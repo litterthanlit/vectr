@@ -30,6 +30,8 @@
     "src",
     "packages/core/src",
     "packages/core/test",
+    "packages/mcp/src",
+    "packages/mcp/test",
     "vite.config.ts"
   ]
 }

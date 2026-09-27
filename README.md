@@ -38,6 +38,16 @@ orbit it in 3D, export clean SVG.
 
 ## For agents and scripts
 
+### MCP server (Claude and other agents)
+
+[`packages/mcp`](packages/mcp) is an MCP server. Run `npm run mcp` once, then start
+Claude Code in this repo; `.mcp.json` registers it. Ask for something like *"make a
+chalk poster with a globe and a twisted torus in a figure frame"* and Claude will build
+it, check the previews, and give you a link that opens it here. See
+[packages/mcp/README.md](packages/mcp/README.md) for Claude Desktop setup and the tool list.
+
+### Library and CLI
+
 The engine lives in [`packages/core`](packages/core) (`@vectr/core`) and has no UI, so
 scripts and agents run the same code the app does. A design is plain JSON, and
 everything except each layer's `type` is optional:
@@ -73,6 +83,10 @@ packages/core/src/
   schema.ts     Validate and normalise untrusted designs; generator catalogue
   share.ts      Share-link encoding (compact JSON → deflate → base64url)
   cli.ts        The `vectr` command
+packages/mcp/src/
+  designs.ts    In-memory design sessions; every change is validated by parseDoc
+  server.ts     MCP tools (create, update, preview, export…)
+  files.ts      File access confined to VECTR_ALLOWED_DIRS
 src/            The React app: canvas, inspector, library, store (undo + autosave)
 ```
 

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vectr": {
+      "command": "node",
+      "args": ["packages/mcp/dist/index.js"],
+      "env": {
+        "VECTR_ALLOWED_DIRS": ".",
+        "VECTR_APP_URL": "http://localhost:5173/"
+      }
+    }
+  }
+}

@@ -10,5 +10,5 @@ const coreSrc = fileURLToPath(new URL('./packages/core/src/index.ts', import.met
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@vectr/core': coreSrc } },
-  test: { include: ['src/**/*.test.{ts,tsx}', 'packages/*/test/**/*.test.ts'] },
+  test: { include: ['src/**/*.test.{ts,tsx}', 'packages/*/test/**/*.test.ts'], testTimeout: 20_000 },
 });

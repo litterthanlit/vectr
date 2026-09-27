@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build -w @vectr/core && tsc -b && vite build",
+    "build": "npm run build -w @vectr/core && npm run build -w vectr-mcp-server && tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b && npm run typecheck -w @vectr/core",
+    "typecheck": "tsc -b && npm run typecheck -w @vectr/core && npm run typecheck -w vectr-mcp-server",
     "test": "vitest run",
-    "vectr": "node packages/core/dist/cli.js"
+    "vectr": "node packages/core/dist/cli.js",
+    "mcp": "npm run build -w @vectr/core && npm run build -w vectr-mcp-server"
   },
   "dependencies": {
     "@vectr/core": "*",

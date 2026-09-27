@@ -1,0 +1,28 @@
+{
+  "name": "vectr-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server that lets AI agents design, preview and export Vectr vector illustrations.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "vectr-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "start": "node dist/index.js",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "@vectr/core": "*",
+    "zod": "^4.6.5"
+  }
+}
