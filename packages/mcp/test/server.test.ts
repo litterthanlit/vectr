@@ -164,7 +164,7 @@ describe('import and export', () => {
     writeFileSync(join(root, 'old.json'), JSON.stringify({ format: 'vectr', version: 1, doc: { layers: [{ type: 'torus' }] } }));
     const v1 = await call('vectr_create_design', { file_path: 'old.json', preview: false });
     expect(textOf(v1)).toMatch(/Converted from a Vectr v1 design/);
-    expect(textOf(v1)).toMatch(/curve\(size=0.3\) → \[0\] revolve\(rings=6, spokes=24, offset=0.68\)/);
+    expect(textOf(v1)).toMatch(/"Torus"[\s\S]*\n  torus\n/);
   });
 
   it('returns small SVG inline and refuses oversized inline output', async () => {

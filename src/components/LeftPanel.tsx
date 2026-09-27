@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Lock, Trash2, Unlock } from 'lucide-react';
 import { memo, useMemo } from 'react';
-import { RECIPES, SOURCES, createForm, docToSVG, formToSVG, renderForm, type FormSpec } from '@vectr/core';
+import { BLOCK_SOURCES, RECIPES, SHAPE_SOURCES, createForm, docToSVG, formToSVG, renderForm, shapeStarter, type FormSpec } from '@vectr/core';
 import { useStore } from '../store';
 import { IconButton } from './controls';
 
@@ -24,6 +24,19 @@ const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
   return <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
+/** Framing tweaks so every shape fills its tile about the same. */
+const SHAPE_THUMB_SCALE: Record<string, number> = { funnel: 30, vortex: 30, orbits: 28, arches: 30, maze: 32, frame: 26 };
+
+const ShapeThumb = memo(function ShapeThumb({ kind }: { kind: string }) {
+  const html = useMemo(() => {
+    const form = createForm(shapeStarter(kind), { x: 50, y: 50 });
+    Object.assign(form, { scale: SHAPE_THUMB_SCALE[kind] ?? 36 });
+    form.style = { ...form.style, width: 0.9, markerSize: 1.25 };
+    return formToSVG(form, renderForm(form, THUMB_RAMP));
+  }, [kind]);
+  return <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
 const RecipeThumb = memo(function RecipeThumb({ id }: { id: string }) {
   const { html, w, h } = useMemo(() => {
     const doc = RECIPES.find((r) => r.id === id)!.build();
@@ -35,23 +48,47 @@ const RecipeThumb = memo(function RecipeThumb({ id }: { id: string }) {
 
 const heading = 'mb-2.5 px-1 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500';
 
+const tile =
+  'group flex w-full flex-col items-center gap-1 rounded-xl p-1 text-zinc-400 ring-1 ring-transparent transition hover:bg-white/[0.04] hover:text-zinc-100 hover:ring-white/[0.08] focus-visible:outline-2 focus-visible:outline-accent';
+const tileArt = 'aspect-square w-full rounded-lg bg-white/[0.025] p-1 transition-transform duration-300 group-hover:scale-[1.04]';
+
 export function Library({ onAdd }: { onAdd?(): void }) {
   const addForm = useStore((s) => s.addForm);
   const loadRecipe = useStore((s) => s.loadRecipe);
   return (
     <div className="px-3 pt-4 pb-2">
-      <h2 className={heading}>Sources</h2>
-      <ul className="grid grid-cols-4 gap-1.5">
-        {SOURCES.map((s) => (
+      <h2 className={heading}>Shapes</h2>
+      <ul className="grid grid-cols-3 gap-1.5" aria-label="Shapes">
+        {SHAPE_SOURCES.map((s) => (
+          <li key={s.kind}>
+            <button
+              type="button"
+              onClick={() => { addForm(shapeStarter(s.kind)); onAdd?.(); }}
+              title={s.blurb}
+              aria-label={`Add ${s.name}: ${s.blurb}`}
+              className={tile}
+            >
+              <span className={tileArt}>
+                <ShapeThumb kind={s.kind} />
+              </span>
+              <span className="w-full truncate text-center text-[11px]">{s.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <h2 className={`${heading} mt-5`}>Build from scratch</h2>
+      <ul className="grid grid-cols-4 gap-1.5" aria-label="Building blocks">
+        {BLOCK_SOURCES.map((s) => (
           <li key={s.kind}>
             <button
               type="button"
               onClick={() => { addForm(SOURCE_STARTERS[s.kind]); onAdd?.(); }}
               title={s.blurb}
               aria-label={`Add ${s.name}: ${s.blurb}`}
-              className="group flex w-full flex-col items-center gap-1 rounded-xl p-1 text-zinc-400 ring-1 ring-transparent transition hover:bg-white/[0.04] hover:text-zinc-100 hover:ring-white/[0.08] focus-visible:outline-2 focus-visible:outline-accent"
+              className={tile}
             >
-              <span className="aspect-square w-full rounded-lg bg-white/[0.025] p-1 transition-transform duration-300 group-hover:scale-[1.04]">
+              <span className={tileArt}>
                 <SourceThumb kind={s.kind} />
               </span>
               <span className="truncate text-[11px]">{s.name}</span>
@@ -59,10 +96,10 @@ export function Library({ onAdd }: { onAdd?(): void }) {
           </li>
         ))}
       </ul>
-      <p className="mt-2 px-1 text-[11px] leading-snug text-zinc-500">Then stack operators on it in the panel on the right.</p>
+      <p className="mt-2 px-1 text-[11px] leading-snug text-zinc-500">Any shape or block takes operators in the panel on the right.</p>
 
       <h2 className={`${heading} mt-5`}>Recipes</h2>
-      <ul className="grid grid-cols-2 gap-1.5">
+      <ul className="grid grid-cols-2 gap-1.5" aria-label="Recipes">
         {RECIPES.filter((r) => r.id !== 'blank').map((r) => (
           <li key={r.id}>
             <button
@@ -90,11 +127,11 @@ export function Forms() {
   const { select, updateForm, removeForm, duplicateForm, moveForm } = useStore.getState();
   const ordered = [...forms].reverse();
   return (
-    <div className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06]">
+    <div className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06] lg:max-h-[38%] lg:flex-none">
       <h2 className="px-4 pt-4 pb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
         Forms <span className="ml-1 font-mono text-zinc-600">{forms.length}</span>
       </h2>
-      {ordered.length === 0 && <p className="px-4 py-2 text-[13px] leading-relaxed text-zinc-500">Add a source or open a recipe to begin.</p>}
+      {ordered.length === 0 && <p className="px-4 py-2 text-[13px] leading-relaxed text-zinc-500">Add a shape or open a recipe to begin.</p>}
       <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-3" aria-label="Forms">
         {ordered.map((f) => {
           const active = f.id === selectedId;

@@ -1,13 +1,15 @@
 /**
  * @vectr/core — the Vectr engine with no UI.
  *
- * A form is a source (curve, lattice, points, note) run through a stack of
- * operators (revolve, sweep, repeat, warp…). The renderer projects the result,
+ * A form is a source (a ready-made shape such as a globe or funnel, or a bare
+ * curve, lattice, points or note) run through a stack of operators (revolve,
+ * sweep, repeat, warp…). The renderer projects the result,
  * groups segments into depth/colour buckets for the house style, and the SVG
  * serialiser writes it out. The app and any agent or script share this code path.
  */
 export * from './types.js';
-export { SOURCES, sourceFor } from './sources/index.js';
+export { BLOCK_SOURCES, SHAPE_SOURCES, SOURCES, sourceFor } from './sources/index.js';
+export { SHAPE_STYLE, shapeStarter, shapeStyle, shapeTransform } from './shapes.js';
 export { OPERATORS, opFor } from './operators/index.js';
 export { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 export { DEFAULT_TRANSFORM, createForm, createOp, defaultName, uid, type FormSpec } from './forms.js';

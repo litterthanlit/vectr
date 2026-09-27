@@ -218,7 +218,9 @@ export default function App() {
 
   const left = (
     <>
-      <Library onAdd={() => setDrawer(null)} />
+      <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <Library onAdd={() => setDrawer(null)} />
+      </div>
       <Forms />
     </>
   );
@@ -303,7 +305,7 @@ export default function App() {
       <div className="relative flex min-h-0 flex-1">
         {/* Left: library + layers */}
         <aside
-          aria-label="Generators and layers"
+          aria-label="Shapes, recipes and forms"
           className={`absolute inset-y-0 left-0 z-30 flex w-[264px] flex-col border-r border-white/[0.06] bg-[#0f0f11]/95 backdrop-blur-xl transition-transform duration-300 lg:static lg:translate-x-0 lg:bg-[#0f0f11] ${
             drawer === 'left' ? 'translate-x-0' : '-translate-x-full'
           }`}

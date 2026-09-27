@@ -19,7 +19,7 @@ export interface ServerConfig {
   appUrl: string;
 }
 
-const INSTRUCTIONS = `Vectr composes generative vector art. Each form is a source (curve, lattice, points or note) run through a stack of operators (revolve, sweep, repeat, mirror, warp, jitter, connect, tile, scatter, resample), then styled: line weight and colour ramp by depth, fading hidden lines, ribbon fills and markers.
+const INSTRUCTIONS = `Vectr composes generative vector art. Each form is a source (a ready-made shape: globe, funnel, vortex, torus, knot, orbits, arches, flowgrid, maze, shape, spirograph, frame; or a bare block: curve, lattice, points or note) run through a stack of operators (revolve, sweep, repeat, mirror, warp, jitter, connect, tile, scatter, resample), then styled: line weight and colour ramp by depth, fading hidden lines, ribbon fills and markers.
 
 Workflow:
 1. vectr_list_building_blocks once to learn sources, operators and their params.
@@ -28,7 +28,7 @@ Workflow:
 4. vectr_mutate_design to explore variations of a form, then apply the one you like.
 5. vectr_export_design to deliver. "link" opens the design in the Vectr app for the user to keep editing; "svg", "png" and "json" write files.
 
-Tips: a circle or arc revolved makes a sphere or torus (use revolve.offset); a wave repeated in depth with fill "ribbons" makes strata; points connected with k-nearest make constellations. Place forms with x,y (artboard px) and size them with scale (radius in px). Invalid values are clamped or dropped and listed under "Corrections" rather than failing; read them and fix your input.`;
+Tips: ready-made shapes read best in the plain ink look: style {"color":"solid","taper":"none","hidden":"dotted","markers":"dot","markersByDepth":false} (the "field-study" recipe shows five side by side). A circle or arc revolved makes a sphere or torus (use revolve.offset); a wave repeated in depth with fill "ribbons" makes strata; points connected with k-nearest make constellations. Place forms with x,y (artboard px) and size them with scale (radius in px). Invalid values are clamped or dropped and listed under "Corrections" rather than failing; read them and fix your input.`;
 
 const text = (t: string) => ({ type: 'text' as const, text: t });
 const image = (png: Buffer) => ({ type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' });
@@ -61,7 +61,7 @@ const StyleInput = z
     taperAmount: z.number().optional().describe('0–1'),
     color: z.enum(['ramp', 'solid']).optional(),
     colorBy: z.enum(['depth', 't', 'family']).optional().describe('What the ramp follows: depth, position along each line, or copy/ring index'),
-    stroke: z.string().nullable().optional().describe('Solid colour (hex) when color is "solid"; null = first ramp stop'),
+    stroke: z.string().nullable().optional().describe('Solid colour (hex) when color is "solid"; null = last, strongest ramp stop'),
     ramp: z.array(z.string()).nullable().optional().describe('This form\'s own ramp (hex stops); null = document ramp'),
     hidden: z.enum(['fade', 'dotted', 'dashed', 'solid', 'hide']).optional().describe('How lines facing away are drawn'),
     fill: z.enum(['none', 'ribbons']).optional().describe('Translucent bands between neighbouring lines'),

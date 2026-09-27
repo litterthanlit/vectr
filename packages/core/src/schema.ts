@@ -310,11 +310,11 @@ export function describeBlocks() {
       }
     });
   return {
-    sources: SOURCES.map((s) => ({ kind: s.kind, name: s.name, description: s.blurb, params: params(s.params, s.defaults) })),
+    sources: SOURCES.map((s) => ({ kind: s.kind, group: s.group ?? 'block', name: s.name, description: s.blurb, params: params(s.params, s.defaults) })),
     operators: OPERATORS.map((o) => ({ kind: o.kind, name: o.name, description: o.blurb, params: params(o.params, o.defaults) })),
     style: {
       params: params(STYLE_PARAMS, DEFAULT_STYLE as unknown as Params),
-      stroke: 'hex colour or null (null = first ramp stop)',
+      stroke: 'hex colour or null (null = last, strongest ramp stop)',
       ramp: `array of 1–${LIMITS.maxRamp} hex colours, or null to use the document ramp`,
     },
     themes: THEMES,

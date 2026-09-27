@@ -1,4 +1,5 @@
 import { createForm, type FormSpec } from './forms.js';
+import { shapeStarter } from './shapes.js';
 import { THEMES } from './themes.js';
 import type { Doc } from './types.js';
 
@@ -19,8 +20,20 @@ function doc(theme: string, specs: (FormSpec & { at?: { x: number; y: number } }
   };
 }
 
-/** Starting points, each a single stack of source + operators. */
+/** Starting points: a row of ready-made shapes, then single stacks of source + operators. */
 export const RECIPES: Recipe[] = [
+  {
+    id: 'field-study',
+    name: 'Field study',
+    blurb: 'Five ready-made shapes side by side in plain ink',
+    build: () => doc('kiln', [
+      { ...shapeStarter('funnel', { transform: { scale: 96 } }), at: { x: 190, y: 450 } },
+      { ...shapeStarter('maze', { transform: { scale: 88 } }), at: { x: 395, y: 450 } },
+      { ...shapeStarter('vortex', { transform: { scale: 92 } }), at: { x: 605, y: 440 } },
+      { ...shapeStarter('arches', { transform: { scale: 95 } }), at: { x: 805, y: 460 } },
+      { ...shapeStarter('flowgrid', { transform: { scale: 92 } }), at: { x: 1010, y: 450 } },
+    ]),
+  },
   {
     id: 'pulse-bloom',
     name: 'Pulse bloom',

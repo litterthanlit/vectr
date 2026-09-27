@@ -1,7 +1,8 @@
 import { sampleRamp } from './color.js';
 import { lerp, rotationMatrix, apply, type Mat3 } from './math.js';
 import { buildForm } from './pipeline.js';
-import type { Form, Vec2, Vec3 } from './types.js';
+import { sourceFor } from './sources/index.js';
+import type { Form, Tone, Vec2, Vec3 } from './types.js';
 
 export interface StrokeBucket {
   d: string;
@@ -58,11 +59,22 @@ export interface Projector {
   view(p: Vec3): Vec3;
   screen(v: Vec3): Vec2;
   isBack(v: Vec3, n?: Vec3): boolean;
+  /** Visible/hidden for a point with a given tone. */
+  toneBack(v: Vec3, tone: Tone | undefined, n?: Vec3): boolean;
 }
 
 export function projector(t: Pick<Form, 'rx' | 'ry' | 'rz' | 'perspective' | 'x' | 'y' | 'scale'>): Projector {
   const m = rotationMatrix(t.rx, t.ry, t.rz);
   const d = cameraDistance(t.perspective);
+  // Only surfaces (geometry with normals) can hide lines. Loose curves are never
+  // "behind" anything unless they ask to hide by depth; the depth taper already
+  // conveys how far away they are.
+  const isBack = (v: Vec3, n?: Vec3) => {
+    if (!n) return false;
+    const rn = apply(m, n);
+    if (!Number.isFinite(d)) return rn[2] < -1e-4;
+    return rn[0] * -v[0] + rn[1] * -v[1] + rn[2] * (d - v[2]) < 0;
+  };
   return {
     m,
     d,
@@ -71,16 +83,11 @@ export function projector(t: Pick<Form, 'rx' | 'ry' | 'rz' | 'perspective' | 'x'
       const s = Number.isFinite(d) ? d / Math.max(0.05, d - z) : 1;
       return [t.x + x * s * t.scale, t.y - y * s * t.scale];
     },
-    isBack: (v, n) => {
-      // Only surfaces (geometry with normals) can hide lines. Loose curves are never
-      // "behind" anything; the depth taper already conveys how far away they are.
-      if (!n) return false;
-      const rn = apply(m, n);
-      if (!Number.isFinite(d)) return rn[2] < -1e-4;
-      return rn[0] * -v[0] + rn[1] * -v[1] + rn[2] * (d - v[2]) < 0;
-    },
+    isBack,
+    toneBack: (v, tone, n) => (tone === 'front' ? false : tone === 'back' ? true : tone === 'depth' ? v[2] < -0.02 : isBack(v, n)),
   };
 }
+
 
 const quant = (v: number, levels: number) => Math.min(levels - 1, Math.max(0, Math.floor(v * levels)));
 const center = (q: number, levels: number) => (levels === 1 ? 1 : q / (levels - 1));
@@ -95,7 +102,8 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
   const st = form.style;
   const P = projector({ ...form, ry: form.ry + extraRy });
   const stops = st.ramp?.length ? st.ramp : docRamp;
-  const solid = st.stroke ?? stops[0] ?? '#ffffff';
+  // The near end of the ramp is its strongest colour, so plain ink reads on any theme.
+  const solid = st.stroke ?? stops[stops.length - 1] ?? '#ffffff';
   const hiddenMode = st.hidden;
 
   // Pass 1: project everything once and find the depth range.
@@ -114,7 +122,7 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
       const v = P.view(line.pts[i]);
       s[i] = P.screen(v);
       z[i] = v[2];
-      back[i] = line.tone === 'front' ? false : line.tone === 'back' ? true : P.isBack(v, line.normals?.[i]);
+      back[i] = P.toneBack(v, line.tone, line.normals?.[i]);
       if (v[2] < zmin) zmin = v[2];
       if (v[2] > zmax) zmax = v[2];
       grow(s[i]);
@@ -232,8 +240,9 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
   // Markers: on the geometry's points, or on line vertices when it has none.
   const markerBuckets = new Map<string, string[]>();
   if (st.markers !== 'none' && st.markerSize > 0) {
-    let marks = nodeViews.map(({ node, v, s }) => ({ s, z: v[2], back: P.isBack(v, node.n), t: node.t ?? 0, fam: node.family ?? 0 }));
-    if (!marks.length) {
+    let marks = nodeViews.map(({ node, v, s }) => ({ s, z: v[2], back: P.toneBack(v, node.tone, node.n), t: node.t ?? 0, fam: node.family ?? 0 }));
+    // Ready-made shapes place their own nodes; only bare blocks fall back to vertices.
+    if (!marks.length && sourceFor(form.source.kind)?.group !== 'shape') {
       const total = lines.reduce((a, l) => a + l.s.length, 0);
       const stride = Math.max(1, Math.ceil(total / MAX_FALLBACK_MARKERS));
       marks = lines.flatMap(({ line, s, z, back }) =>

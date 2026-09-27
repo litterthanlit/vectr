@@ -89,21 +89,25 @@ describe('v1 migration', () => {
     ],
   };
 
-  it('rebuilds every v1 layer type as a stack that renders', () => {
+  it('carries every v1 layer over to its shape source, unchanged', () => {
     const { doc, warnings } = parseDoc({ format: 'vectr', version: 1, doc: v1 });
     expect(doc.forms).toHaveLength(12);
-    expect(warnings[0]).toMatch(/Converted from a Vectr v1 design/);
-    expect(warnings.some((w) => /frame labels/.test(w))).toBe(true);
-    // Only informational warnings: nothing was rejected by validation.
-    expect(warnings.filter((w) => /forms\[/.test(w))).toEqual([]);
+    // Only the informational note: nothing lost, nothing rejected by validation.
+    expect(warnings).toEqual(['Converted from a Vectr v1 design']);
+    expect(doc.forms.map((f) => f.source.kind)).toEqual([
+      'globe', 'funnel', 'vortex', 'torus', 'knot', 'orbits', 'arches', 'flowgrid', 'maze', 'shape', 'spirograph', 'frame',
+    ]);
+    expect(doc.forms.every((f) => f.ops.length === 0)).toBe(true);
     const f = doc.forms[0];
-    expect(f).toMatchObject({ x: 200, y: 450, rx: 12, ry: 18, source: { kind: 'curve' } });
-    expect(f.ops[0]).toMatchObject({ kind: 'revolve', params: { spokes: 16 } });
-    expect(doc.forms[9].style).toMatchObject({ stroke: '#ff6a3d', hidden: 'dashed', color: 'solid', taper: 'none' });
+    expect(f).toMatchObject({ x: 200, y: 450, rx: 12, ry: 18, scale: 160 });
+    expect(f.source.params).toMatchObject({ meridians: 8, rings: 2 });
+    expect(doc.forms[1].source.params).toMatchObject({ profile: 'vase', whiskers: 0.35 });
+    expect(doc.forms[9].style).toMatchObject({ stroke: '#ff6a3d', hidden: 'dashed', color: 'solid', taper: 'none', width: 3 });
+    expect(doc.forms[11].source.params).toMatchObject({ fig: 'FIG. 1' });
     for (const form of doc.forms) expect(docToSVG({ ...doc, forms: [form] })).toMatch(/<path d="M/);
-    // Dots only where the rebuilt stack still has real nodes (funnel), not on node-less forms (maze).
+    // v1 per-shape node defaults: dots on the funnel, none on the globe.
     expect(doc.forms[1].style.markers).toBe('dot');
-    expect(doc.forms[8].style.markers).toBe('none');
+    expect(doc.forms[0].style.markers).toBe('none');
   });
 
   it('opens v1 share links', async () => {
@@ -142,7 +146,8 @@ describe('compact + share links', () => {
 describe('describeBlocks', () => {
   it('lists sources, operators and style with typed params and defaults', () => {
     const b = describeBlocks();
-    expect(b.sources.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note']);
+    expect(b.sources.filter((s) => s.group === 'block').map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note']);
+    expect(b.sources.filter((s) => s.group === 'shape')).toHaveLength(12);
     expect(b.operators.map((o) => o.kind)).toContain('revolve');
     for (const block of [...b.sources, ...b.operators]) for (const p of block.params) expect(p.default).not.toBeUndefined();
     expect(b.sources[0].params.find((p) => p.key === 'turns')).toMatchObject({ only_when: { key: 'shape', in: ['spiral'] } });

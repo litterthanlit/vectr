@@ -185,7 +185,7 @@ function StyleSections({ form, doc }: { form: Form; doc: Doc }) {
                 )}
               </>
             ) : (
-              <ColorField label="Line colour" value={st.stroke} swatches={doc.ramp} allowInherit inheritLabel="Ramp start" onChange={(c) => set('stroke', c)} />
+              <ColorField label="Line colour" value={st.stroke} swatches={doc.ramp} allowInherit inheritLabel="Theme ink" onChange={(c) => set('stroke', c)} />
             ))}
         </Section>
       ))}
@@ -249,7 +249,7 @@ function DocInspector() {
       <div className="border-b border-white/[0.06] px-4 py-4">
         <h2 className="text-[15px] font-medium text-white">Document</h2>
         <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-          Add a source on the left, then stack operators on it. Drag to move; hold <kbd className="kbd">Alt</kbd> or press <kbd className="kbd">O</kbd> to orbit.
+          Add a shape on the left, then stack operators on it if you like. Drag to move; hold <kbd className="kbd">Alt</kbd> or press <kbd className="kbd">O</kbd> to orbit.
         </p>
       </div>
       <Section title="Theme">

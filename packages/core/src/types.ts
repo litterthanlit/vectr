@@ -1,8 +1,12 @@
 export type Vec3 = [number, number, number];
 export type Vec2 = [number, number];
 
-/** How a polyline decides whether it is drawn as visible or hidden. */
-export type Tone = 'auto' | 'front' | 'back';
+/**
+ * How a polyline decides whether it is drawn as visible or hidden. `auto` follows the
+ * normals (lines without normals stay visible); `depth` hides whatever sits behind the
+ * form's centre, for ready-made shapes whose loose lines have no surface.
+ */
+export type Tone = 'auto' | 'front' | 'back' | 'depth';
 
 export interface Polyline {
   pts: Vec3[];
@@ -23,6 +27,7 @@ export interface Polyline {
 export interface GeoNode {
   p: Vec3;
   n?: Vec3;
+  tone?: Tone;
   t?: number;
   family?: number;
 }
@@ -61,6 +66,8 @@ export interface BlockDef {
   kind: string;
   name: string;
   blurb: string;
+  /** Sources only: a bare building block, or a complete ready-made shape. */
+  group?: 'block' | 'shape';
   params: ParamDef[];
   defaults: Params;
 }
@@ -85,7 +92,7 @@ export interface Style {
   taperAmount: number;
   color: 'solid' | 'ramp';
   colorBy: ColorBy;
-  /** Solid colour; null = first stop of the document ramp. */
+  /** Solid colour; null = the last (nearest, strongest) stop of the ramp. */
   stroke: string | null;
   /** Gradient stops; null = the document ramp. */
   ramp: string[] | null;

@@ -64,7 +64,7 @@ export function blocksMarkdown(kind?: string): string {
       '',
     );
   }
-  const section = (title: string, list: typeof b.sources) => {
+  const section = (title: string, list: { kind: string; name: string; description: string; params: ParamInfo[] }[]) => {
     const shown = list.filter((x) => !kind || x.kind === kind);
     if (!shown.length) return;
     if (!kind) out.push(`## ${title}`, '');
@@ -74,7 +74,8 @@ export function blocksMarkdown(kind?: string): string {
       out.push('');
     }
   };
-  section('Sources', b.sources);
+  section('Shapes (ready-made sources: add with no ops, or stack operators on them)', b.sources.filter((x) => x.group === 'shape'));
+  section('Sources (bare building blocks)', b.sources.filter((x) => x.group !== 'shape'));
   section('Operators', b.operators);
   if (!kind || kind === 'style') {
     out.push('## Style', `- \`stroke\`: ${b.style.stroke}`, `- \`ramp\`: ${b.style.ramp}`);

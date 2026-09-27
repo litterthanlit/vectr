@@ -47,7 +47,25 @@ const code = await encodeDoc(doc); // "v2.…" → https://your-vectr/#d=<code>
 
 ## Building blocks
 
-| Sources | |
+| Shapes (ready-made sources) | |
+| --- | --- |
+| `globe` | latitude / longitude wireframe with orbiting rings |
+| `funnel` | surface of revolution with whiskers: trumpet, cone, hourglass, vase, bowl, bulb |
+| `vortex` | tapering helix strands with level loops and rungs |
+| `torus` | donut mesh, optionally twisted into spirals |
+| `knot` | (p, q) torus knot with echoes and beads |
+| `orbits` | rings inscribed on an ellipsoid shell, with equator, axis and labels |
+| `arches` | receding arches with construction lines and a trajectory arrow |
+| `flowgrid` | a grid that bends, fans, twists or ripples, with nodes |
+| `maze` | Truchet tiles that link into loops |
+| `shape` | rounded polygons, stars, squircles, flowers and blobs with echoes |
+| `spirograph` | hypo- and epitrochoid rosettes |
+| `frame` | a plate border with crosshair, ruler ticks and captions |
+
+Shapes are drawn in plain ink by default in the app; `shapeStarter(kind)` gives that
+form spec (camera plus style) for scripts.
+
+| Building-block sources | |
 | --- | --- |
 | `curve` | circle, arc, line, rect, polygon, star, squircle, flower, blob, spiral/helix, wave, trochoid, lissajous, torus knot, vessel profile |
 | `lattice` | a grid of points and lines, square or hex, with an optional circle or diamond mask |
