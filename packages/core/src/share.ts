@@ -6,7 +6,9 @@ import type { Doc } from './types.js';
  * Uses the standard CompressionStream API (browsers and Node 18+).
  */
 
-const PREFIX = 'v1.';
+const PREFIX = 'v2.';
+/** v1 links carry a v1 document; parseDoc migrates it. */
+const LEGACY_PREFIX = 'v1.';
 /** Guards against decompression bombs in pasted links. */
 const MAX_ENCODED = 200_000;
 const MAX_DECODED = 2_000_000;
@@ -54,11 +56,12 @@ export async function encodeDoc(doc: Doc): Promise<string> {
 
 export async function decodeDoc(code: string): Promise<ParseResult> {
   const s = code.trim().replace(/^#?d=/, '');
-  if (!s.startsWith(PREFIX)) throw new Error('Unrecognised share code');
+  const prefix = s.startsWith(PREFIX) ? PREFIX : s.startsWith(LEGACY_PREFIX) ? LEGACY_PREFIX : null;
+  if (!prefix) throw new Error('Unrecognised share code');
   if (s.length > MAX_ENCODED) throw new Error('Design is too large');
   let bytes: Uint8Array<ArrayBuffer>;
   try {
-    bytes = await pipe(fromB64Url(s.slice(PREFIX.length)), new DecompressionStream('deflate-raw'), MAX_DECODED);
+    bytes = await pipe(fromB64Url(s.slice(prefix.length)), new DecompressionStream('deflate-raw'), MAX_DECODED);
   } catch (e) {
     if (e instanceof Error && e.message === 'Design is too large') throw e;
     throw new Error('Share code is corrupted');

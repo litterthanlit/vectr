@@ -1,14 +1,14 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { TEMPLATES, THEMES, decodeDoc, docToSVG, describeGenerators, parseDoc, serializeDoc, shareURL } from '@vectr/core';
+import { MAX_OPS, RECIPES, THEMES, decodeDoc, describeBlocks, docToSVG, serializeDoc, shareURL, type Doc } from '@vectr/core';
 import { z } from 'zod';
 import { DesignError, DesignStore, type Design } from './designs.js';
 import { FileAccessError, Files } from './files.js';
-import { GENERATOR_TYPES, generatorsMarkdown, summarize, warningsBlock } from './format.js';
+import { BLOCK_KINDS, OP_KINDS, SOURCE_KINDS, blocksMarkdown, summarize, warningsBlock } from './format.js';
 import { renderPNG } from './preview.js';
 
 export const SERVER_NAME = 'vectr-mcp-server';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 
 /** Inline SVG/JSON above this size must be written to a file instead. */
 export const CHARACTER_LIMIT = 60_000;
@@ -19,15 +19,16 @@ export interface ServerConfig {
   appUrl: string;
 }
 
-const INSTRUCTIONS = `Vectr makes generative vector illustrations: wireframe globes, funnels, helices, tori, knots, orbit diagrams, arches, warped grids, Truchet mazes, rounded icon shapes, spirographs and figure frames. Shapes are 3D; lines facing away from the viewer are drawn dotted/dashed/faded.
+const INSTRUCTIONS = `Vectr composes generative vector art. Each form is a source (curve, lattice, points or note) run through a stack of operators (revolve, sweep, repeat, mirror, warp, jitter, connect, tile, scatter, resample), then styled: line weight and colour ramp by depth, fading hidden lines, ribbon fills and markers.
 
 Workflow:
-1. vectr_list_generators to learn the shape types and their params (once per session).
-2. vectr_create_design (optionally from a template, JSON, share link or project file). It returns a design_id and a preview image.
-3. vectr_update_design to add/modify/remove layers. Every call returns a fresh preview; look at it and iterate.
-4. vectr_export_design to deliver: "link" opens the design in the Vectr app for the user to keep editing; "svg"/"png"/"json" write files.
+1. vectr_list_building_blocks once to learn sources, operators and their params.
+2. vectr_create_design, blank or from a recipe, JSON, share link or project file. It returns a design_id and a preview image.
+3. vectr_update_design to add or change forms and their operator stacks. Every call returns a fresh preview; look at it and iterate.
+4. vectr_mutate_design to explore variations of a form, then apply the one you like.
+5. vectr_export_design to deliver. "link" opens the design in the Vectr app for the user to keep editing; "svg", "png" and "json" write files.
 
-Tips: position with x,y in artboard pixels (layer centre), size with scale (radius in px). rx tilts toward/away, ry turns left/right. Invalid values are clamped or dropped and reported under "Corrections" rather than failing; read them and fix your input.`;
+Tips: a circle or arc revolved makes a sphere or torus (use revolve.offset); a wave repeated in depth with fill "ribbons" makes strata; points connected with k-nearest make constellations. Place forms with x,y (artboard px) and size them with scale (radius in px). Invalid values are clamped or dropped and listed under "Corrections" rather than failing; read them and fix your input.`;
 
 const text = (t: string) => ({ type: 'text' as const, text: t });
 const image = (png: Buffer) => ({ type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' });
@@ -50,57 +51,88 @@ async function guard(fn: () => Promise<CallToolResult> | CallToolResult): Promis
 // ---------- Schemas ----------
 
 const ResponseFormat = z.enum(['markdown', 'json']).default('markdown').describe("'markdown' for a readable summary, 'json' for structured data");
-
 const PreviewWidth = z.number().int().min(128).max(2000).default(640).describe('Preview PNG width in pixels (default 640)');
+const Params = z.record(z.string(), z.union([z.number(), z.boolean(), z.string()]));
 
 const StyleInput = z
   .object({
-    stroke: z.string().nullable().optional().describe('Line colour, e.g. "#ff6a3d". null = use the document ink'),
-    width: z.number().optional().describe('Stroke width in px, 0.1–40'),
-    back: z.enum(['dotted', 'dashed', 'solid', 'faded', 'hidden']).optional().describe('How lines facing away from the viewer are drawn'),
-    nodes: z.boolean().optional().describe('Draw dots at nodes/intersections'),
-    nodeSize: z.number().optional().describe('Node dot radius, 0–40'),
-    backNodes: z.boolean().optional().describe('Also draw nodes on the far side'),
-    labels: z.boolean().optional().describe('Draw text labels (orbits, frame)'),
-    labelSize: z.number().optional().describe('Label font size, 4–96'),
-    opacity: z.number().optional().describe('0–1'),
+    width: z.number().optional().describe('Line weight in px'),
+    taper: z.enum(['none', 'depth', 't']).optional().describe('Thin and lighten lines with depth, or along each line'),
+    taperAmount: z.number().optional().describe('0–1'),
+    color: z.enum(['ramp', 'solid']).optional(),
+    colorBy: z.enum(['depth', 't', 'family']).optional().describe('What the ramp follows: depth, position along each line, or copy/ring index'),
+    stroke: z.string().nullable().optional().describe('Solid colour (hex) when color is "solid"; null = first ramp stop'),
+    ramp: z.array(z.string()).nullable().optional().describe('This form\'s own ramp (hex stops); null = document ramp'),
+    hidden: z.enum(['fade', 'dotted', 'dashed', 'solid', 'hide']).optional().describe('How lines facing away are drawn'),
+    fill: z.enum(['none', 'ribbons']).optional().describe('Translucent bands between neighbouring lines'),
+    fillOpacity: z.number().optional(),
+    markers: z.enum(['none', 'dot', 'ring', 'cross', 'tick']).optional(),
+    markerSize: z.number().optional(),
+    markerEvery: z.number().optional(),
+    markersByDepth: z.boolean().optional(),
+    labels: z.boolean().optional(),
+    labelSize: z.number().optional(),
+    opacity: z.number().optional(),
   })
   .loose();
 
-const layerFields = {
+const transformFields = {
   name: z.string().max(80).optional().describe('Display name'),
-  x: z.number().optional().describe('Centre x in artboard pixels (default: artboard centre)'),
-  y: z.number().optional().describe('Centre y in artboard pixels (default: artboard centre)'),
-  scale: z.number().optional().describe('Radius in pixels (default: 28% of the shorter artboard side)'),
-  rx: z.number().optional().describe('Tilt in degrees, -360–360 (positive tips the top away)'),
+  x: z.number().optional().describe('Centre x in artboard px (default: centre)'),
+  y: z.number().optional().describe('Centre y in artboard px (default: centre)'),
+  scale: z.number().optional().describe('Radius in px (default: 30% of the shorter side)'),
+  rx: z.number().optional().describe('Tilt in degrees (negative tips the top toward you)'),
   ry: z.number().optional().describe('Turn in degrees'),
-  rz: z.number().optional().describe('Roll in degrees, -360–360'),
-  perspective: z.number().optional().describe('0 = flat/orthographic, 1 = strong perspective'),
-  spin: z.number().optional().describe('Auto-rotation speed in the app (degrees/second)'),
+  rz: z.number().optional().describe('Roll in degrees'),
+  perspective: z.number().optional().describe('0 = flat, 1 = strong perspective'),
+  spin: z.number().optional().describe('Auto-rotation in the app, degrees/second'),
   visible: z.boolean().optional(),
-  params: z
-    .record(z.string(), z.union([z.number(), z.boolean(), z.string()]))
-    .optional()
-    .describe('Generator settings (see vectr_list_generators). Unspecified params keep their defaults'),
-  style: StyleInput.optional(),
 };
 
-const LayerInput = z.object({ type: z.enum(GENERATOR_TYPES).describe('Generator type'), ...layerFields }).loose();
-const LayerUpdate = z
-  .object({ id: z.string().describe('Layer id from the design summary, e.g. "L2"'), ...layerFields })
-  .loose()
-  .describe('Only the fields you pass change; params and style are merged into the existing ones');
+const OpInput = z
+  .object({ kind: z.enum(OP_KINDS), params: Params.optional().describe('Operator settings; unspecified ones use defaults'), enabled: z.boolean().optional() })
+  .loose();
+
+const FormInput = z
+  .object({
+    source: z.object({ kind: z.enum(SOURCE_KINDS), params: Params.optional() }).loose().describe('What the form starts from'),
+    ops: z.array(OpInput).max(MAX_OPS).optional().describe('Operators, applied top to bottom'),
+    style: StyleInput.optional(),
+    ...transformFields,
+  })
+  .loose();
+
+const OpPatch = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('add'), kind: z.enum(OP_KINDS), params: Params.optional(), index: z.number().int().optional().describe('Insert position (default: end)') }),
+  z.object({ action: z.literal('update'), index: z.number().int(), params: Params.optional(), enabled: z.boolean().optional() }),
+  z.object({ action: z.literal('remove'), index: z.number().int() }),
+  z.object({ action: z.literal('move'), index: z.number().int(), to: z.number().int() }),
+]);
+
+const FormUpdate = z
+  .object({
+    id: z.string().describe('Form id from the summary, e.g. "F2"'),
+    source_params: Params.optional().describe('Merged into the current source params'),
+    source: z.object({ kind: z.enum(SOURCE_KINDS), params: Params.optional() }).optional().describe('Replace the source entirely'),
+    ops: z.array(OpInput).max(MAX_OPS).optional().describe('Replace the whole operator stack'),
+    ops_patch: z.array(OpPatch).max(24).optional().describe('Edit the stack in place; indexes start at 0 and apply in order'),
+    style: StyleInput.optional().describe('Merged into the current style'),
+    ...transformFields,
+  })
+  .loose();
 
 const DocSettings = z
   .object({
     width: z.number().optional().describe('Artboard width in px, 64–8000'),
     height: z.number().optional().describe('Artboard height in px, 64–8000'),
-    theme: z.enum(THEMES.map((t) => t.id) as [string, ...string[]]).optional().describe('Sets background, ink and roughness together'),
+    theme: z.enum(THEMES.map((t) => t.id) as [string, ...string[]]).optional().describe('Sets background and ramp together'),
     background: z.string().optional().describe('Background colour, e.g. "#111214"'),
-    ink: z.string().optional().describe('Default line colour'),
-    rough: z.number().optional().describe('Hand-drawn wobble, 0 (crisp) – 20'),
+    ramp: z.array(z.string()).optional().describe('Document colour ramp, 1–6 hex stops, far → near'),
+    rough: z.number().optional().describe('Hand-drawn wobble, 0–20'),
   })
   .strict();
+
+const STRENGTH = { subtle: 0.12, medium: 0.3, wild: 0.65 } as const;
 
 // ---------- Server ----------
 
@@ -108,7 +140,6 @@ export function createServer(config: ServerConfig) {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
   const store = new DesignStore();
 
-  /** Standard reply for anything that changes a design: summary, corrections, preview. */
   const designReply = (d: Design, warnings: string[], lead: string, preview: boolean, width = 640): CallToolResult => {
     const content: CallToolResult['content'] = [text(`${lead}\n\n${summarize(store, d)}${warningsBlock(warnings)}`)];
     if (preview) content.push(image(renderPNG(d.doc, width)));
@@ -116,28 +147,23 @@ export function createServer(config: ServerConfig) {
   };
 
   server.registerTool(
-    'vectr_list_generators',
+    'vectr_list_building_blocks',
     {
-      title: 'List Vectr generators',
-      description: `List the shape generators, their params (with ranges and defaults), the style options, themes and templates.
+      title: 'List Vectr building blocks',
+      description: `Describe the sources, operators and style options (every param with its range and default), plus themes and recipes.
 
-Call this once before designing. Pass "type" to see a single generator.
-
-Returns markdown by default, or JSON (response_format="json") with one entry per generator:
-{ type, name, description, params: [{ key, label, type, min?, max?, options?, default }], defaultTransform, defaultStyle }`,
-      inputSchema: {
-        type: z.enum(GENERATOR_TYPES).optional().describe('Only describe this generator'),
-        response_format: ResponseFormat,
-      },
+Call this once before designing. Pass "block" to see one source or operator (or "style").
+Params marked "only when" apply only for certain values of another param (e.g. curve "turns" only for shape "spiral").`,
+      inputSchema: { block: z.enum(BLOCK_KINDS).optional().describe('Only describe this block'), response_format: ResponseFormat },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    ({ type, response_format }) =>
+    ({ block, response_format }) =>
       guard(() => {
-        const data = describeGenerators().filter((g) => !type || g.type === type);
-        return {
-          content: [text(response_format === 'json' ? JSON.stringify(data, null, 2) : generatorsMarkdown(type))],
-          structuredContent: { generators: data },
-        };
+        const all = describeBlocks();
+        const data = block
+          ? { sources: all.sources.filter((s) => s.kind === block), operators: all.operators.filter((o) => o.kind === block), ...(block === 'style' ? { style: all.style } : {}) }
+          : all;
+        return { content: [text(response_format === 'json' ? JSON.stringify(data, null, 2) : blocksMarkdown(block))], structuredContent: data };
       }),
   );
 
@@ -148,17 +174,15 @@ Returns markdown by default, or JSON (response_format="json") with one entry per
       description: `Start a new design and get its id plus a preview image.
 
 Choose at most one source (omit all for a blank canvas):
-  - template: a starter composition (${TEMPLATES.map((t) => t.id).join(', ')})
-  - design: a JSON design, e.g. { "theme": "ozone", "width": 1000, "height": 1000, "layers": [{ "type": "sphere", "rx": 15 }] }
-  - share_link: a Vectr link or code containing "#d=v1.…"
-  - file_path: a saved Vectr project (.json) inside the allowed folders
-"settings" (theme, size, colours) is applied on top of the source.
-
-Invalid values are corrected and listed under "Corrections"; the call still succeeds.`,
+  - recipe: a starter (${RECIPES.map((t) => t.id).join(', ')})
+  - design: JSON, e.g. { "theme": "ozone", "forms": [{ "source": { "kind": "curve", "params": { "shape": "arc", "start": -90, "sweep": 180 } }, "ops": [{ "kind": "revolve" }], "rx": -20 }] }
+  - share_link: a Vectr link or code containing "#d=v2.…" (v1 links work too)
+  - file_path: a saved Vectr project (.json) inside the allowed folders; v1 projects are converted
+"settings" (theme, size, colours) is applied on top of the source.`,
       inputSchema: {
         name: z.string().max(80).optional().describe('A name for the design'),
-        template: z.enum(TEMPLATES.map((t) => t.id) as [string, ...string[]]).optional(),
-        design: z.record(z.string(), z.unknown()).optional().describe('A Vectr design object (layers optional)'),
+        recipe: z.enum(RECIPES.map((t) => t.id) as [string, ...string[]]).optional(),
+        design: z.record(z.string(), z.unknown()).optional().describe('A Vectr design object (forms optional)'),
         share_link: z.string().max(200_000).optional(),
         file_path: z.string().optional(),
         settings: DocSettings.optional(),
@@ -169,11 +193,11 @@ Invalid values are corrected and listed under "Corrections"; the call still succ
     },
     (a) =>
       guard(async () => {
-        const sources = (['template', 'design', 'share_link', 'file_path'] as const).filter((k) => a[k] !== undefined);
+        const sources = (['recipe', 'design', 'share_link', 'file_path'] as const).filter((k) => a[k] !== undefined);
         if (sources.length > 1) throw new DesignError(`Pass only one source; got ${sources.join(' and ')}.`);
-        let input: unknown = { layers: [] };
+        let input: unknown = { forms: [] };
         let warnings: string[] = [];
-        if (a.template) input = TEMPLATES.find((t) => t.id === a.template)!.build();
+        if (a.recipe) input = RECIPES.find((t) => t.id === a.recipe)!.build();
         else if (a.design) input = a.design;
         else if (a.share_link) ({ doc: input, warnings } = await decodeDoc(a.share_link.slice(a.share_link.indexOf('#') + 1)));
         else if (a.file_path) input = await config.files.read(a.file_path, ['.json']);
@@ -194,24 +218,23 @@ Invalid values are corrected and listed under "Corrections"; the call still succ
     'vectr_update_design',
     {
       title: 'Update a Vectr design',
-      description: `Change a design in one atomic call and get a fresh preview. Operations are applied in this order:
-  1. set: artboard settings (theme, width, height, background, ink, rough)
-  2. remove_layer_ids: delete layers
-  3. update_layers: change existing layers; only the fields you pass change, and params/style are merged
-  4. add_layers: new layers on top (each needs "type"; everything else is optional). New ids are L1, L2… in order
-  5. layer_order: every layer id, bottom → top
+      description: `Change a design in one atomic call and get a fresh preview. Applied in this order:
+  1. set: artboard settings (theme, width, height, background, ramp, rough)
+  2. remove_form_ids
+  3. update_forms: only fields you pass change. source_params and style merge; "ops" replaces the stack; "ops_patch" edits it
+     ({ "action": "add", "kind": "warp", "params": {…} } | { "action": "update", "index": 0, "params": {…} } | { "action": "remove", "index": 1 } | { "action": "move", "index": 2, "to": 0 })
+  4. add_forms: new forms on top (ids F1, F2… in order). Each needs source.kind
+  5. form_order: every form id, bottom → top
 
-Example: { "design_id": "d1", "add_layers": [{ "type": "torus", "x": 300, "y": 300, "scale": 150, "rx": -60, "style": { "back": "dashed" } }],
-           "update_layers": [{ "id": "L1", "params": { "rings": 4 } }] }
-
-Corrections for invalid values are listed in the reply; the design is always left valid.`,
+Example: { "design_id": "d1", "add_forms": [{ "source": { "kind": "points", "params": { "count": 120 } }, "ops": [{ "kind": "connect", "params": { "k": 3, "bow": 0.5 } }], "style": { "markers": "dot" } }],
+           "update_forms": [{ "id": "F1", "ops_patch": [{ "action": "add", "kind": "warp", "params": { "kind": "twist", "amount": 0.8 } }] }] }`,
       inputSchema: {
         design_id: z.string(),
         set: DocSettings.optional(),
-        add_layers: z.array(LayerInput).max(50).optional(),
-        update_layers: z.array(LayerUpdate).max(200).optional(),
-        remove_layer_ids: z.array(z.string()).max(200).optional(),
-        layer_order: z.array(z.string()).max(200).optional(),
+        add_forms: z.array(FormInput).max(50).optional(),
+        update_forms: z.array(FormUpdate).max(200).optional(),
+        remove_form_ids: z.array(z.string()).max(200).optional(),
+        form_order: z.array(z.string()).max(200).optional(),
         preview: z.boolean().default(true).describe('Include a PNG preview'),
         preview_width: PreviewWidth,
       },
@@ -221,6 +244,44 @@ Corrections for invalid values are listed in the reply; the design is always lef
       guard(() => {
         const { design, warnings } = store.update(a.design_id, a);
         return designReply(design, warnings, `Updated design \`${design.id}\`.`, a.preview, a.preview_width);
+      }),
+  );
+
+  server.registerTool(
+    'vectr_mutate_design',
+    {
+      title: 'Mutate a Vectr form',
+      description: `Explore variations of one form: its params are nudged and operators occasionally added, removed or swapped.
+Without "apply": returns "count" numbered previews (the rest of the design unchanged) and keeps them.
+With "apply": n, the n-th variation from the last call replaces the form. Any other update discards pending variations.`,
+      inputSchema: {
+        design_id: z.string(),
+        form_id: z.string().describe('Form id, e.g. "F1"'),
+        count: z.number().int().min(1).max(8).default(4),
+        strength: z.enum(['subtle', 'medium', 'wild']).default('medium'),
+        seed: z.number().int().min(1).max(1_000_000).optional().describe('Repeat a batch by reusing its seed'),
+        apply: z.number().int().min(1).max(8).optional().describe('Apply variation n from the previous call'),
+        preview_width: z.number().int().min(128).max(1200).default(360),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    (a) =>
+      guard(() => {
+        if (a.apply !== undefined) {
+          const d = store.applyVariation(a.design_id, a.form_id, a.apply);
+          return designReply(d, [], `Applied variation ${a.apply} to \`${a.form_id}\`.`, true, 640);
+        }
+        const seed = a.seed ?? Math.floor(Math.random() * 1_000_000) + 1;
+        const { design, forms } = store.mutate(a.design_id, a.form_id, a.count, STRENGTH[a.strength], seed);
+        const content: CallToolResult['content'] = [
+          text(`${forms.length} variations of \`${a.form_id}\` (seed ${seed}). Apply one with { "apply": n }.`),
+        ];
+        forms.forEach((f, i) => {
+          const doc: Doc = { ...design.doc, forms: design.doc.forms.map((x) => (x.id === a.form_id ? { ...f, id: x.id } : x)) };
+          content.push(text(`Variation ${i + 1}: ${f.source.kind} → ${f.ops.filter((o) => o.enabled).map((o) => o.kind).join(' → ') || '(no operators)'}`));
+          content.push(image(renderPNG(doc, a.preview_width)));
+        });
+        return { content, structuredContent: { seed, count: forms.length } };
       }),
   );
 
@@ -243,7 +304,7 @@ Corrections for invalid values are listed in the reply; the design is always lef
     'vectr_get_design',
     {
       title: 'Get a Vectr design',
-      description: `Describe a design: artboard settings and every layer with its id, position, rotation and non-default params.
+      description: `Describe a design: artboard settings and every form with its id, source, operator stack (with indexes for ops_patch) and non-default style.
 response_format "json" returns the compact design JSON (defaults omitted), which can be passed back to vectr_create_design.`,
       inputSchema: { design_id: z.string(), response_format: ResponseFormat },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -269,9 +330,9 @@ response_format "json" returns the compact design JSON (defaults omitted), which
     },
     () =>
       guard(() => {
-        const list = store.list().map((d) => ({ design_id: d.id, name: d.name, width: d.doc.width, height: d.doc.height, layers: d.doc.layers.length }));
+        const list = store.list().map((d) => ({ design_id: d.id, name: d.name, width: d.doc.width, height: d.doc.height, forms: d.doc.forms.length }));
         const md = list.length
-          ? list.map((d) => `- \`${d.design_id}\` ${d.name}: ${d.width}×${d.height}, ${d.layers} layer${d.layers === 1 ? '' : 's'}`).join('\n')
+          ? list.map((d) => `- \`${d.design_id}\` ${d.name}: ${d.width}×${d.height}, ${d.forms} form${d.forms === 1 ? '' : 's'}`).join('\n')
           : 'No designs yet. Create one with vectr_create_design.';
         return { content: [text(md)], structuredContent: { designs: list } };
       }),
@@ -344,6 +405,3 @@ file_path must be inside the allowed folders: ${config.files.describe()}`,
 
   return server;
 }
-
-/** Validate a design without storing it (used by tests and handy for scripting). */
-export const validate = (input: unknown) => parseDoc(input);

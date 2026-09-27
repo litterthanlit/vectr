@@ -1,18 +1,20 @@
 # vectr-mcp-server
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI agents such as Claude
-design with Vectr. The agent describes shapes as JSON, sees a PNG preview after every
-change, and hands you a link that opens the result in the Vectr app for editing.
+compose with Vectr. The agent builds forms from sources and operators, sees a PNG
+preview after every change, explores mutations, and hands you a link that opens the
+result in the Vectr app for editing.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
-| `vectr_list_generators` | Every shape type with its params (ranges, options, defaults), plus style options, themes and templates |
-| `vectr_create_design` | New design: blank, or from a template, a JSON design, a share link or a saved project file. Returns an id and a preview |
-| `vectr_update_design` | One atomic edit: artboard settings, then remove, update, add and reorder layers. Returns a fresh preview |
+| `vectr_list_building_blocks` | Sources, operators and style options with every param's range and default, plus themes and recipes |
+| `vectr_create_design` | New design: blank, or from a recipe, JSON, a share link or a saved project (v1 projects are converted). Returns an id and a preview |
+| `vectr_update_design` | One atomic edit: artboard settings, then remove, update (with `ops_patch` to edit a stack in place), add and reorder forms. Returns a fresh preview |
+| `vectr_mutate_design` | Numbered previews of variations of a form; call again with `apply: n` to keep one |
 | `vectr_render_preview` | PNG of a design at any width |
-| `vectr_get_design` | Readable summary, or compact JSON with defaults omitted |
+| `vectr_get_design` | Readable summary with operator indexes, or compact JSON |
 | `vectr_list_designs` | Designs open in this session |
 | `vectr_export_design` | `link` (opens in the app), `svg`, `png` or `json` (project file) |
 | `vectr_delete_design` | Discard a design |

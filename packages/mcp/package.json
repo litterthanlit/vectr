@@ -1,6 +1,6 @@
 {
   "name": "vectr-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server that lets AI agents design, preview and export Vectr vector illustrations.",
   "type": "module",
   "license": "MIT",

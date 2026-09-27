@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { renderLayer, renderLayerCached, type RenderedLayer } from '@vectr/core';
+import { renderForm, renderFormCached, type RenderedForm } from '@vectr/core';
 import { useStore } from '../store';
 import { ArtboardContent } from './Artboard';
 
@@ -19,7 +19,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
   const selectedId = useStore((s) => s.selectedId);
   const tool = useStore((s) => s.tool);
   const playing = useStore((s) => s.playing);
-  const { select, updateLayer } = useStore.getState();
+  const { select, updateForm } = useStore.getState();
 
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -71,12 +71,12 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
   }, []);
 
   const rendered = useMemo(() => {
-    const m = new Map<string, RenderedLayer>();
-    for (const l of doc.layers) {
-      m.set(l.id, playing && l.spin ? renderLayer(l, (l.spin * time) % 360) : renderLayerCached(l));
+    const m = new Map<string, RenderedForm>();
+    for (const f of doc.forms) {
+      m.set(f.id, playing && f.spin ? renderForm(f, doc.ramp, (f.spin * time) % 360) : renderFormCached(f, doc.ramp));
     }
     return m;
-  }, [doc.layers, playing, time]);
+  }, [doc.forms, doc.ramp, playing, time]);
 
   const pad = 64;
   const fit = Math.max(0.05, Math.min((size.w - pad * 2) / doc.width, (size.h - pad * 2) / doc.height));
@@ -124,27 +124,27 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
     if (e.button === 0) select(null);
   };
 
-  const onLayerDown = (e: RPointerEvent, id: string) => {
+  const onFormDown = (e: RPointerEvent, id: string) => {
     if (e.button === 1 || spaceDown.current) return startPan(e);
     e.stopPropagation();
-    const layer = doc.layers.find((l) => l.id === id);
-    if (!layer) return;
+    const form = doc.forms.find((l) => l.id === id);
+    if (!form) return;
     select(id);
     wrap.current!.setPointerCapture(e.pointerId);
     if (tool === 'orbit' || e.altKey) {
-      drag.current = { kind: 'orbit', id, sx: e.clientX, sy: e.clientY, rx: layer.rx, ry: layer.ry };
+      drag.current = { kind: 'orbit', id, sx: e.clientX, sy: e.clientY, rx: form.rx, ry: form.ry };
     } else {
       const p = toArt(e);
-      drag.current = { kind: 'move', id, sx: p.x, sy: p.y, lx: layer.x, ly: layer.y };
+      drag.current = { kind: 'move', id, sx: p.x, sy: p.y, lx: form.x, ly: form.y };
     }
   };
 
   const onHandleDown = (e: RPointerEvent, id: string) => {
     e.stopPropagation();
-    const layer = doc.layers.find((l) => l.id === id)!;
+    const form = doc.forms.find((l) => l.id === id)!;
     const p = toArt(e);
     wrap.current!.setPointerCapture(e.pointerId);
-    drag.current = { kind: 'scale', id, cx: layer.x, cy: layer.y, d0: Math.hypot(p.x - layer.x, p.y - layer.y) || 1, s0: layer.scale };
+    drag.current = { kind: 'scale', id, cx: form.x, cy: form.y, d0: Math.hypot(p.x - form.x, p.y - form.y) || 1, s0: form.scale };
   };
 
   const onMove = (e: RPointerEvent) => {
@@ -156,17 +156,17 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
       const p = toArt(e);
       let dx = p.x - d.sx, dy = p.y - d.sy;
       if (e.shiftKey) Math.abs(dx) > Math.abs(dy) ? (dy = 0) : (dx = 0);
-      updateLayer(d.id, { x: Math.round(d.lx + dx), y: Math.round(d.ly + dy) }, 'drag');
+      updateForm(d.id, { x: Math.round(d.lx + dx), y: Math.round(d.ly + dy) }, 'drag');
     } else if (d.kind === 'orbit') {
       const snap = (v: number) => (e.shiftKey ? Math.round(v / 15) * 15 : Math.round(v));
-      updateLayer(d.id, {
+      updateForm(d.id, {
         ry: snap(d.ry + (e.clientX - d.sx) * 0.5),
         rx: snap(Math.max(-90, Math.min(90, d.rx - (e.clientY - d.sy) * 0.5))),
       }, 'orbit');
     } else if (d.kind === 'scale') {
       const p = toArt(e);
       const k = Math.hypot(p.x - d.cx, p.y - d.cy) / d.d0;
-      updateLayer(d.id, { scale: Math.max(8, Math.round(d.s0 * k)) }, 'scale');
+      updateForm(d.id, { scale: Math.max(8, Math.round(d.s0 * k)) }, 'scale');
     }
   };
 
@@ -174,7 +174,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
     drag.current = null;
   };
 
-  const selected = doc.layers.find((l) => l.id === selectedId && l.visible);
+  const selected = doc.forms.find((l) => l.id === selectedId && l.visible);
   const sel = selected ? rendered.get(selected.id) : undefined;
   const hs = 8 / s; // handle size in artboard units
   const cursor = panning ? 'grab' : tool === 'orbit' ? 'grab' : 'default';
@@ -203,7 +203,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
           </svg>
 
           {/* Hit areas */}
-          {doc.layers.map((l) => {
+          {doc.forms.map((l) => {
             const r = rendered.get(l.id);
             if (!r || !l.visible || l.locked) return null;
             const p = 6 / s;
@@ -213,7 +213,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
                 x={r.bbox.x - p} y={r.bbox.y - p} width={r.bbox.w + p * 2} height={r.bbox.h + p * 2}
                 fill="transparent"
                 style={{ cursor: panning ? 'grab' : tool === 'orbit' ? 'grab' : 'move' }}
-                onPointerDown={(e) => onLayerDown(e, l.id)}
+                onPointerDown={(e) => onFormDown(e, l.id)}
                 aria-label={`Select ${l.name}`}
               />
             );
@@ -224,11 +224,11 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
             <g pointerEvents="none">
               <rect
                 x={sel.bbox.x} y={sel.bbox.y} width={sel.bbox.w} height={sel.bbox.h}
-                fill="none" stroke="#ff6a3d" strokeWidth={1.25 / s}
+                fill="none" style={{ stroke: 'var(--color-accent)' }} strokeWidth={1.25 / s}
               />
-              <circle cx={selected.x} cy={selected.y} r={3 / s} fill="#ff6a3d" />
+              <circle cx={selected.x} cy={selected.y} r={3 / s} style={{ fill: 'var(--color-accent)' }} />
               <g transform={`translate(${sel.bbox.x} ${sel.bbox.y - 8 / s}) scale(${1 / s})`}>
-                <text fontSize={11} fontFamily="Inter, sans-serif" fill="#ff6a3d" fontWeight={500}>
+                <text fontSize={11} fontFamily="'Inter Tight', sans-serif" style={{ fill: 'var(--color-accent)' }} fontWeight={500}>
                   {selected.name} · {Math.round(selected.rx)}° / {Math.round(selected.ry)}°
                 </text>
               </g>
@@ -244,8 +244,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
               <rect
                 key={i}
                 x={(x as number) - hs / 2} y={(y as number) - hs / 2} width={hs} height={hs} rx={2 / s}
-                fill="#fff" stroke="#ff6a3d" strokeWidth={1.25 / s}
-                style={{ cursor: c as string }}
+                fill="#fff" style={{ stroke: 'var(--color-accent)', cursor: c as string }} strokeWidth={1.25 / s}
                 onPointerDown={(e) => onHandleDown(e, selected.id)}
                 aria-label="Scale handle"
               />

@@ -1,12 +1,13 @@
 import {
-  Download, FolderOpen, Hand, Link2, LayoutTemplate, Maximize, Minus, MousePointer2, Orbit, Pause, Play, Plus, Redo2, SlidersHorizontal, Shapes, Undo2, X,
+  BookOpen, Download, FolderOpen, Hand, Link2, Maximize, Sparkles, Minus, MousePointer2, Orbit, Pause, Play, Plus, Redo2, SlidersHorizontal, Shapes, Undo2, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Canvas, type CanvasView } from './components/Canvas';
 import { IconButton } from './components/controls';
 import { Inspector } from './components/Inspector';
-import { Layers, Library } from './components/LeftPanel';
-import { TEMPLATES, decodeDoc } from '@vectr/core';
+import { Forms, Library } from './components/LeftPanel';
+import { MutateStrip } from './components/MutateStrip';
+import { RECIPES, accentFrom, decodeDoc } from '@vectr/core';
 import { copySVG, copyShareLink, downloadPNG, downloadProject, downloadSVG } from './lib/export';
 import { useStore } from './store';
 
@@ -31,7 +32,7 @@ function Menu({ label, icon, children }: { label: string; icon: ReactNode; child
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-[13px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-2 focus-visible:outline-orange-400"
+        className="inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-[13px] text-zinc-300 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-2 focus-visible:outline-accent"
       >
         {icon}
         <span className="hidden sm:inline">{label}</span>
@@ -65,7 +66,14 @@ export default function App() {
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const hasSelection = useStore((s) => s.selectedId !== null);
-  const { setTool, togglePlay, undo, redo, loadTemplate } = useStore.getState();
+  const { setTool, togglePlay, undo, redo, loadRecipe, setMutateOpen } = useStore.getState();
+  const mutateOpen = useStore((s) => s.mutateOpen);
+  const ramp = useStore((s) => s.doc.ramp);
+
+  // The interface accent follows the document's colour ramp.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--accent', accentFrom(ramp));
+  }, [ramp]);
   const [view, setView] = useState<CanvasView>({ zoom: 1, pan: { x: 0, y: 0 } });
   const [toast, setToast] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
@@ -169,7 +177,7 @@ export default function App() {
         s.redo();
       } else if (mod && k === 'd' && id) {
         e.preventDefault();
-        s.duplicateLayer(id);
+        s.duplicateForm(id);
       } else if (mod && k === 'o') {
         e.preventDefault();
         fileInput.current?.click();
@@ -180,7 +188,7 @@ export default function App() {
         return;
       } else if ((k === 'backspace' || k === 'delete') && id) {
         e.preventDefault();
-        s.removeLayer(id);
+        s.removeForm(id);
       } else if (k === 'escape') {
         s.select(null);
       } else if (k === 'v') {
@@ -189,17 +197,17 @@ export default function App() {
         s.setTool('orbit');
       } else if (k === 'p') {
         s.togglePlay();
-      } else if (k === 'r' && id) {
-        s.randomize(id);
+      } else if (k === 'm' && id) {
+        s.setMutateOpen(!s.mutateOpen);
       } else if (k === '0') {
         setView({ zoom: 1, pan: { x: 0, y: 0 } });
       } else if (id && k.startsWith('arrow')) {
         e.preventDefault();
-        const l = s.doc.layers.find((x) => x.id === id)!;
+        const l = s.doc.forms.find((x) => x.id === id)!;
         const step = e.shiftKey ? 10 : 1;
         const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0;
         const dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
-        s.updateLayer(id, { x: l.x + dx, y: l.y + dy }, 'nudge');
+        s.updateForm(id, { x: l.x + dx, y: l.y + dy }, 'nudge');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -211,7 +219,7 @@ export default function App() {
   const left = (
     <>
       <Library onAdd={() => setDrawer(null)} />
-      <Layers />
+      <Forms />
     </>
   );
 
@@ -243,17 +251,17 @@ export default function App() {
                 <ellipse cx="16" cy="16" rx="5" ry="11" />
                 <ellipse cx="16" cy="16" rx="11" ry="4" strokeDasharray="0 3" strokeLinecap="round" />
               </g>
-              <circle cx="16" cy="5" r="2.4" fill="#ff6a3d" />
+              <circle cx="16" cy="5" r="2.4" fill="var(--color-accent)" />
             </svg>
             <span className="text-[15px] font-semibold tracking-tight text-white">Vectr</span>
-            <span className="hidden rounded-full border border-white/10 px-2 py-0.5 font-mono text-[10px] text-zinc-500 sm:inline">beta</span>
+            <span className="hidden rounded-full border border-white/10 px-2 py-0.5 font-mono text-[10px] text-zinc-500 sm:inline">v2</span>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Menu label="Templates" icon={<LayoutTemplate size={15} />}>
+          <Menu label="Recipes" icon={<BookOpen size={15} />}>
             {(close) =>
-              TEMPLATES.map((t) => (
-                <MenuItem key={t.id} onClick={() => { loadTemplate(t.id); setView({ zoom: 1, pan: { x: 0, y: 0 } }); close(); }}>
+              RECIPES.map((t) => (
+                <MenuItem key={t.id} onClick={() => { loadRecipe(t.id); setView({ zoom: 1, pan: { x: 0, y: 0 } }); close(); }}>
                   {t.name}
                 </MenuItem>
               ))
@@ -306,6 +314,7 @@ export default function App() {
         {/* Canvas */}
         <main className="relative min-w-0 flex-1 bg-[radial-gradient(circle_at_50%_40%,#17171a_0%,#0b0b0c_70%)]">
           <Canvas view={view} setView={setView} />
+          <MutateStrip />
 
           {/* Floating toolbar */}
           <div
@@ -318,6 +327,9 @@ export default function App() {
             <div className="mx-1 h-5 w-px bg-white/10" />
             <IconButton label={playing ? 'Pause spin' : 'Play spin'} shortcut="P" active={playing} onClick={togglePlay}>
               {playing ? <Pause size={15} /> : <Play size={15} />}
+            </IconButton>
+            <IconButton label="Mutate" shortcut="M" active={mutateOpen} disabled={!hasSelection} onClick={() => setMutateOpen(!mutateOpen)}>
+              <Sparkles size={15} />
             </IconButton>
             <div className="mx-1 h-5 w-px bg-white/10" />
             <IconButton label="Undo" shortcut="⌘Z" disabled={!canUndo} onClick={undo}><Undo2 size={15} /></IconButton>
@@ -361,7 +373,7 @@ export default function App() {
         </aside>
 
         {dragging && (
-          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-orange-400/70 bg-black/50 backdrop-blur-sm">
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent/70 bg-black/50 backdrop-blur-sm">
             <p className="text-[15px] font-medium text-white">Drop a Vectr design (.json) to open it</p>
           </div>
         )}

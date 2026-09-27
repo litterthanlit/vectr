@@ -1,64 +1,73 @@
 # @vectr/core
 
-The engine behind Vectr, with no UI: parametric shape generators, 3D projection with
-hidden-line styling, SVG output, design validation, share links and a CLI. It runs in
-the browser and in Node 18+, with zero runtime dependencies.
+The engine behind Vectr, with no UI: sources and operators that compose into forms,
+3D projection with depth-driven styling, SVG output, validation, v1 migration, share
+links, mutation and a CLI. It runs in browsers and Node 18+ and has no runtime
+dependencies.
 
 ## API
 
 ```ts
-import { parseDoc, docToSVG, describeGenerators, encodeDoc } from '@vectr/core';
+import { parseDoc, docToSVG, describeBlocks, variations, encodeDoc } from '@vectr/core';
 
-// 1. Describe a design. Only layer `type` is required; everything else has defaults.
+// 1. Describe a design. Only source.kind is required per form.
 const { doc, warnings } = parseDoc({
-  theme: 'signal',                 // graphite | signal | kiln | ozone | bloom
-  width: 1200, height: 900,
-  layers: [
-    { type: 'revolve', x: 400, y: 450, scale: 180, rx: -18, params: { profile: 'vase' } },
-    { type: 'grid', x: 850, y: 450, params: { warp: 'twist', amount: 0.8 }, style: { back: 'dashed' } },
+  theme: 'kiln',
+  forms: [
+    {
+      source: { kind: 'curve', params: { shape: 'wave', cycles: 3 } },
+      ops: [
+        { kind: 'repeat', params: { count: 20, dz: 0.08 } },
+        { kind: 'warp', params: { kind: 'noise', amount: 0.4 } },
+      ],
+      style: { fill: 'ribbons', colorBy: 'family' },
+      rx: -35, ry: 30,
+    },
   ],
 });
 
 // 2. Render it. This is exactly what the app shows.
 const svg = docToSVG(doc);
 
-// 3. Or hand it back to a person as a link that opens in the app.
-const code = await encodeDoc(doc);   // → "v1.…", use as https://your-vectr/#d=<code>
+// 3. Explore, or hand it to a person as a link that opens in the app.
+const [a, b, c] = variations(doc.forms[0], 3, /* seed */ 7);
+const code = await encodeDoc(doc); // "v2.…" → https://your-vectr/#d=<code>
 ```
 
 | Function | What it does |
 | --- | --- |
-| `parseDoc(input)` | Accepts a saved file, a bare doc, a partial spec or a JSON string. Returns `{ doc, warnings }` and throws only when the input can't be a design at all. |
-| `docToSVG(doc)` | A standalone SVG string. Every document string is escaped. |
-| `describeGenerators()` | Every generator with its params (type, range, options, default), for building prompts or tool schemas. |
-| `compactDoc(doc)` | The design with default values removed: the smallest faithful form. |
-| `serializeDoc(doc)` | The saved-project file format (`{ format: "vectr", version: 1, doc }`). |
-| `encodeDoc` / `decodeDoc` | Share-link codes (size-capped against decompression bombs). |
-| `renderLayer(layer)` | Low level: projected front/back path data, nodes, labels and bbox. |
+| `parseDoc(input)` | Accepts a saved file, a bare doc, a partial spec, a JSON string or a Vectr v1 design. Returns `{ doc, warnings }`; throws only when the input can't be a design. |
+| `docToSVG(doc)` | Standalone SVG. Every document string is escaped. |
+| `describeBlocks()` | Every source, operator and style option, with param types, ranges, defaults and `only_when` conditions. |
+| `buildForm(form)` | Run a source and its operators: geometry plus warnings (point budget, skipped operators). |
+| `renderForm(form, ramp)` | Projected, bucketed strokes, fills, markers and labels. |
+| `mutate` / `variations` | Seeded variations of a form. |
+| `compactDoc` / `serializeDoc` | Smallest faithful JSON / the saved-project format (`{ format: "vectr", version: 2, doc }`). |
+| `encodeDoc` / `decodeDoc` | Share-link codes; v1 codes still decode. |
 
-## Design format
+## Building blocks
 
-```jsonc
-{
-  "width": 1200, "height": 900,          // 64–8000
-  "theme": "ozone",                      // or set "background" / "ink" colours directly
-  "rough": 2,                            // hand-drawn wobble, 0–20
-  "layers": [{
-    "type": "sphere",                    // run `vectr generators` for the full list
-    "x": 600, "y": 450,                  // centre, artboard pixels (default: centre)
-    "scale": 300,                        // radius in pixels
-    "rx": 15, "ry": 30, "rz": 0,         // tilt / turn / roll, degrees
-    "perspective": 0,                    // 0 = flat, 1 = strong
-    "params": { "meridians": 8 },        // per-generator settings
-    "style": {
-      "stroke": "#ff6a3d",               // omit to follow the document ink
-      "width": 1.5,
-      "back": "dotted",                  // dotted | dashed | solid | faded | hidden
-      "nodes": true, "nodeSize": 3, "labels": true
-    }
-  }]
-}
-```
+| Sources | |
+| --- | --- |
+| `curve` | circle, arc, line, rect, polygon, star, squircle, flower, blob, spiral/helix, wave, trochoid, lissajous, torus knot, vessel profile |
+| `lattice` | a grid of points and lines, square or hex, with an optional circle or diamond mask |
+| `points` | seeded clouds: disc, ring, box, ball, sphere shell, sunflower |
+| `note` | an annotation: a dot, a leader line and a label |
+
+| Operators | |
+| --- | --- |
+| `revolve` | spin lines around the vertical axis into a surface (rings, spokes, offset, twist) |
+| `sweep` | copy lines along a straight, helical or orbital path, with rails |
+| `repeat` | row, ring or grid arrays that grow or turn per copy |
+| `mirror` | reflect across x, y and/or z |
+| `warp` | bend, twist, taper, wave, fan, ripple, bulge, pinch, spherize, noise (normals are carried through) |
+| `jitter` | seeded wobble, grainy to flowing |
+| `connect` | nearest neighbours, within distance, in order, or to the centre; optionally bowed |
+| `tile` | a motif at every point; quarter arcs link into loops |
+| `scatter` | points along the lines |
+| `resample` | even spacing, dashes or dots |
+
+Run `vectr blocks` for every parameter.
 
 ## CLI
 
@@ -66,8 +75,8 @@ const code = await encodeDoc(doc);   // → "v1.…", use as https://your-vectr/
 vectr render <design.json | ->  [-o out.svg]
 vectr check  <design.json | ->          # prints the normalised design
 vectr link   <design.json | ->  [--base URL]
-vectr template <starter | blank>
-vectr generators
+vectr recipe <pulse-bloom | strata | constellation | tidal-field | coil-garden | vessel | meander | loom-knot | blank>
+vectr blocks
 ```
 
 Warnings go to stderr and the exit code is 1 only for unusable input, so agents can

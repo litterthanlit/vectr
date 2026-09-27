@@ -1,30 +1,36 @@
 export type Vec3 = [number, number, number];
 export type Vec2 = [number, number];
 
-/** How a polyline decides between the "front" (solid) and "back" (secondary) stroke. */
+/** How a polyline decides whether it is drawn as visible or hidden. */
 export type Tone = 'auto' | 'front' | 'back';
 
 export interface Polyline {
   pts: Vec3[];
-  /** Per-point surface normals. When present they drive front/back classification. */
+  /** Per-point surface normals. When present they drive visible/hidden classification. */
   normals?: Vec3[];
   closed?: boolean;
   tone?: Tone;
   /** Draw an arrowhead at the end of the line. */
   arrow?: boolean;
+  /** Per-point position along the original source curve, 0–1. Drives "by t" styling. */
+  t?: number[];
+  /** Ordinal within its structure (ring index, copy index…). Drives "by family" colour. */
+  family?: number;
+  /** Lines sharing a band, adjacent in order and equal in length, get ribbon fills between them. */
+  band?: number;
 }
 
 export interface GeoNode {
   p: Vec3;
   n?: Vec3;
+  t?: number;
+  family?: number;
 }
 
 export interface GeoLabel {
   p: Vec3;
   text: string;
   anchor?: 'start' | 'middle' | 'end';
-  /** Draw a small dot before the text, like a figure annotation. */
-  marker?: boolean;
 }
 
 export interface Geometry {
@@ -36,23 +42,61 @@ export interface Geometry {
 export type ParamValue = number | boolean | string;
 export type Params = Record<string, ParamValue>;
 
-export type ParamDef =
+/** Show a param only when another select param has one of these values. */
+export interface ParamWhen {
+  key: string;
+  in: string[];
+}
+
+export type ParamDef = (
   | { key: string; label: string; kind: 'range'; min: number; max: number; step: number; unit?: string }
   | { key: string; label: string; kind: 'toggle' }
   | { key: string; label: string; kind: 'select'; options: { value: string; label: string }[] }
   | { key: string; label: string; kind: 'text'; placeholder?: string }
-  | { key: string; label: string; kind: 'seed' };
+  | { key: string; label: string; kind: 'seed' }
+) & { when?: ParamWhen; help?: string };
 
-export type BackStyle = 'dotted' | 'dashed' | 'solid' | 'faded' | 'hidden';
+/** A building block: a source (makes geometry) or an operator (transforms it). */
+export interface BlockDef {
+  kind: string;
+  name: string;
+  blurb: string;
+  params: ParamDef[];
+  defaults: Params;
+}
 
-export interface LayerStyle {
-  /** null = follow the document ink colour. */
-  stroke: string | null;
+export interface SourceDef extends BlockDef {
+  build(p: Params): Geometry;
+}
+
+export interface OpDef extends BlockDef {
+  apply(g: Geometry, p: Params): Geometry;
+}
+
+export type HiddenStyle = 'fade' | 'dotted' | 'dashed' | 'solid' | 'hide';
+export type Taper = 'none' | 'depth' | 't';
+export type ColorBy = 'depth' | 't' | 'family';
+export type MarkerShape = 'none' | 'dot' | 'ring' | 'cross' | 'tick';
+
+export interface Style {
   width: number;
-  back: BackStyle;
-  nodes: boolean;
-  nodeSize: number;
-  backNodes: boolean;
+  /** Line weight and lightness vary along depth or along the curve. */
+  taper: Taper;
+  taperAmount: number;
+  color: 'solid' | 'ramp';
+  colorBy: ColorBy;
+  /** Solid colour; null = first stop of the document ramp. */
+  stroke: string | null;
+  /** Gradient stops; null = the document ramp. */
+  ramp: string[] | null;
+  /** How lines facing away from the viewer are drawn. */
+  hidden: HiddenStyle;
+  fill: 'none' | 'ribbons';
+  fillOpacity: number;
+  markers: MarkerShape;
+  markerSize: number;
+  markerEvery: number;
+  markersByDepth: boolean;
   labels: boolean;
   labelSize: number;
   opacity: number;
@@ -61,7 +105,7 @@ export interface LayerStyle {
 export interface Transform {
   x: number;
   y: number;
-  /** Radius, in artboard pixels, of the generator's unit space. */
+  /** Radius, in artboard pixels, of the form's unit space. */
   scale: number;
   rx: number;
   ry: number;
@@ -70,35 +114,33 @@ export interface Transform {
   perspective: number;
 }
 
-export interface Layer extends Transform {
+export interface Op {
   id: string;
-  type: string;
+  kind: string;
+  enabled: boolean;
+  params: Params;
+}
+
+export interface Form extends Transform {
+  id: string;
   name: string;
   visible: boolean;
   locked: boolean;
   /** Degrees per second of Y rotation while the canvas is playing. */
   spin: number;
-  params: Params;
-  style: LayerStyle;
+  source: { kind: string; params: Params };
+  ops: Op[];
+  style: Style;
 }
 
 export interface Doc {
+  version: 2;
   width: number;
   height: number;
   background: string;
-  ink: string;
+  /** Document colour ramp (2–6 hex stops). Forms use it unless they set their own. */
+  ramp: string[];
   /** Hand-drawn displacement amount (0 = crisp). */
   rough: number;
-  layers: Layer[];
-}
-
-export interface Generator {
-  type: string;
-  name: string;
-  blurb: string;
-  params: ParamDef[];
-  defaults: Params;
-  transform?: Partial<Transform>;
-  style?: Partial<LayerStyle>;
-  build(p: Params): Geometry;
+  forms: Form[];
 }

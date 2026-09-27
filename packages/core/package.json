@@ -1,6 +1,6 @@
 {
   "name": "@vectr/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Vectr's generative vector-shape engine: generators, 3D projection with hidden-line styling, SVG export, and a CLI.",
   "type": "module",
   "license": "MIT",

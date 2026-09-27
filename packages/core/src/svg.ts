@@ -1,5 +1,5 @@
-import { renderLayer, type RenderedLayer } from './render.js';
-import type { BackStyle, Doc, Layer } from './types.js';
+import { renderForm, type RenderedForm } from './render.js';
+import type { Doc, Form, HiddenStyle } from './types.js';
 
 /**
  * SVG serialisation. The app renders the artboard through these same functions,
@@ -9,7 +9,7 @@ import type { BackStyle, Doc, Layer } from './types.js';
  * documents arrive from files, links and agents, and the app injects this markup.
  */
 
-export const LABEL_FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+export const LABEL_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 export const ROUGH_FILTER_ID = 'vectr-rough';
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -17,52 +17,36 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
 
 const n = (v: number) => (Math.round(v * 100) / 100).toString();
 
-function backAttrs(back: BackStyle, width: number): string {
-  switch (back) {
-    case 'dotted':
-      return ` stroke-dasharray="0 ${(width * 2.8 + 1.2).toFixed(2)}" stroke-linecap="round"`;
-    case 'dashed':
-      return ` stroke-dasharray="${(width * 5 + 3).toFixed(2)} ${(width * 3 + 3).toFixed(2)}"`;
-    case 'faded':
-      return ' stroke-opacity="0.28"';
-    default:
-      return '';
-  }
+function dash(hidden: HiddenStyle, width: number): string {
+  if (hidden === 'dotted') return ` stroke-dasharray="0 ${n(width * 2.8 + 1.2)}"`;
+  if (hidden === 'dashed') return ` stroke-dasharray="${n(width * 5 + 3)} ${n(width * 3 + 3)}"`;
+  return '';
 }
 
-/** Markup for one layer (a `<g>`), from an already-projected render. */
-export function layerToSVG(layer: Layer, r: RenderedLayer, ink: string): string {
-  const s = layer.style;
-  const color = esc(s.stroke ?? ink);
-  const w = n(s.width);
-  const showBack = s.back !== 'hidden';
-  const out: string[] = [`<g opacity="${n(s.opacity)}">`];
-
-  if (showBack && r.back) {
-    out.push(`<path d="${r.back}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linejoin="round"${backAttrs(s.back, s.width)}/>`);
+/** Markup for one form (a `<g>`), from an already-projected render. */
+export function formToSVG(form: Form, r: RenderedForm): string {
+  const st = form.style;
+  const out: string[] = [`<g opacity="${n(st.opacity)}">`];
+  for (const fl of r.fills) {
+    out.push(`<path d="${fl.d}" fill="${esc(fl.color)}" fill-opacity="${n(fl.opacity)}" stroke="none"/>`);
   }
-  if (r.front) {
-    out.push(`<path d="${r.front}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`);
+  for (const s of r.strokes) {
+    out.push(
+      `<path d="${s.d}" fill="none" stroke="${esc(s.color)}" stroke-width="${n(s.width)}" stroke-opacity="${n(s.opacity)}" stroke-linecap="round" stroke-linejoin="round"${s.hidden ? dash(st.hidden, s.width) : ''}/>`,
+    );
   }
-  for (const d of r.arrows) {
-    out.push(`<path d="${d}" fill="${color}" stroke="${color}" stroke-width="${n(s.width * 0.5)}" stroke-linejoin="round"/>`);
+  for (const a of r.arrows) out.push(`<path d="${a.d}" fill="${esc(a.color)}" stroke="${esc(a.color)}" stroke-width="${n(st.width * 0.5)}" stroke-linejoin="round"/>`);
+  for (const m of r.markers) {
+    out.push(
+      m.filled
+        ? `<path d="${m.d}" fill="${esc(m.color)}" fill-opacity="${n(m.opacity)}"/>`
+        : `<path d="${m.d}" fill="none" stroke="${esc(m.color)}" stroke-opacity="${n(m.opacity)}" stroke-width="${n(m.width)}" stroke-linecap="round"/>`,
+    );
   }
-  if (s.nodes && s.nodeSize > 0) {
-    out.push(`<g fill="${color}">`);
-    if (s.backNodes && showBack) {
-      const op = s.back === 'faded' ? ' opacity="0.35"' : '';
-      for (const [x, y] of r.nodesBack) out.push(`<circle cx="${n(x)}" cy="${n(y)}" r="${n(s.nodeSize * 0.8)}"${op}/>`);
-    }
-    for (const [x, y] of r.nodesFront) out.push(`<circle cx="${n(x)}" cy="${n(y)}" r="${n(s.nodeSize)}"/>`);
-    out.push('</g>');
-  }
-  if (s.labels && r.labels.length) {
-    const size = s.labelSize;
-    out.push(`<g fill="${color}" font-family="${esc(LABEL_FONT)}" font-size="${n(size)}" letter-spacing="0.04em">`);
-    for (const l of r.labels) {
-      if (l.marker) out.push(`<circle cx="${n(l.x - size * 0.6)}" cy="${n(l.y - size * 0.32)}" r="${n(Math.max(1, size * 0.12))}"/>`);
-      out.push(`<text x="${n(l.x)}" y="${n(l.y)}" text-anchor="${l.anchor}">${esc(l.text)}</text>`);
-    }
+  if (st.labels && r.labels.length) {
+    const color = r.strokes[r.strokes.length - 1]?.color ?? '#ffffff';
+    out.push(`<g fill="${esc(color)}" font-family="${esc(LABEL_FONT)}" font-size="${n(st.labelSize)}" letter-spacing="0.02em">`);
+    for (const l of r.labels) out.push(`<text x="${n(l.x)}" y="${n(l.y)}" text-anchor="${l.anchor}">${esc(l.text)}</text>`);
     out.push('</g>');
   }
   out.push('</g>');
@@ -79,10 +63,10 @@ export function roughFilterSVG(rough: number): string {
 }
 
 /** A complete, standalone SVG document. */
-export function docToSVG(doc: Doc, rendered?: Map<string, RenderedLayer>): string {
-  const body = doc.layers
-    .filter((l) => l.visible)
-    .map((l) => layerToSVG(l, rendered?.get(l.id) ?? renderLayer(l), doc.ink))
+export function docToSVG(doc: Doc, rendered?: Map<string, RenderedForm>): string {
+  const body = doc.forms
+    .filter((f) => f.visible)
+    .map((f) => formToSVG(f, rendered?.get(f.id) ?? renderForm(f, doc.ramp)))
     .join('');
   const filter = doc.rough > 0 ? ` filter="url(#${ROUGH_FILTER_ID})"` : '';
   return (

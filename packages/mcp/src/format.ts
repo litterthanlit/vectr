@@ -1,35 +1,38 @@
-import { GENERATORS, THEMES, TEMPLATES, describeGenerators } from '@vectr/core';
+import { OPERATORS, RECIPES, SOURCES, THEMES, describeBlocks } from '@vectr/core';
 import type { Design, DesignStore } from './designs.js';
 
-const fmt = (v: unknown) => (typeof v === 'number' ? String(Math.round(v * 100) / 100) : JSON.stringify(v));
+const fmt = (v: unknown) => (typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : JSON.stringify(v));
+const kv = (o: unknown) => (o && typeof o === 'object' ? Object.entries(o as Record<string, unknown>).map(([k, v]) => `${k}=${fmt(v)}`).join(', ') : '');
 
 /** One-screen summary of a design: what an agent needs to decide its next edit. */
 export function summarize(store: DesignStore, d: Design): string {
   const doc = d.doc;
-  const theme = THEMES.find((t) => t.background === doc.background && t.ink === doc.ink);
-  const compact = store.compact(d).layers as Record<string, unknown>[];
+  const theme = THEMES.find((t) => t.background === doc.background && t.ramp.join() === doc.ramp.join());
+  const compact = store.compact(d).forms as Record<string, unknown>[];
   const lines = [
-    `**${d.name}** (id \`${d.id}\`) · ${doc.width}×${doc.height} · ${theme ? `theme ${theme.id}` : `background ${doc.background}, ink ${doc.ink}`}${doc.rough ? ` · rough ${fmt(doc.rough)}` : ''}`,
+    `**${d.name}** (id \`${d.id}\`) · ${doc.width}×${doc.height} · ${theme ? `theme ${theme.id}` : `background ${doc.background}, ramp ${doc.ramp.join(' → ')}`}${doc.rough ? ` · rough ${fmt(doc.rough)}` : ''}`,
   ];
-  if (!doc.layers.length) {
-    lines.push('', 'No layers yet. Add some with vectr_update_design → add_layers.');
+  if (!doc.forms.length) {
+    lines.push('', 'No forms yet. Add some with vectr_update_design → add_forms.');
     return lines.join('\n');
   }
-  lines.push('', 'Layers, bottom → top:');
-  doc.layers.forEach((l, i) => {
+  lines.push('', 'Forms, bottom → top:');
+  doc.forms.forEach((f, i) => {
     const c = compact[i];
-    const bits = [
-      `at (${fmt(l.x)}, ${fmt(l.y)})`,
-      `size ${fmt(l.scale)}`,
-      `rotate x${fmt(l.rx)}° y${fmt(l.ry)}° z${fmt(l.rz)}°`,
-    ];
-    if (l.perspective) bits.push(`perspective ${fmt(l.perspective)}`);
-    if (l.spin) bits.push(`spin ${fmt(l.spin)}°/s`);
-    if (!l.visible) bits.push('hidden');
-    const params = c.params ? Object.entries(c.params).map(([k, v]) => `${k}=${fmt(v)}`).join(', ') : 'defaults';
-    const style = c.style ? Object.entries(c.style).map(([k, v]) => `${k}=${fmt(v)}`).join(', ') : '';
-    lines.push(`- \`${l.id}\` **${l.type}** "${l.name}" ${bits.join(' · ')}`);
-    lines.push(`  params: ${params}${style ? ` · style: ${style}` : ''}`);
+    const src = c.source as { kind: string; params?: Record<string, unknown> };
+    const chain = f.ops
+      .map((o, k) => {
+        const p = (c.ops as { params?: Record<string, unknown> }[] | undefined)?.[k]?.params;
+        return `[${k}] ${o.kind}${p ? `(${kv(p)})` : ''}${o.enabled ? '' : ' (off)'}`;
+      })
+      .join(' → ');
+    const bits = [`at (${fmt(f.x)}, ${fmt(f.y)})`, `scale ${fmt(f.scale)}`, `rotate x${fmt(f.rx)}° y${fmt(f.ry)}° z${fmt(f.rz)}°`];
+    if (f.perspective) bits.push(`perspective ${fmt(f.perspective)}`);
+    if (f.spin) bits.push(`spin ${fmt(f.spin)}°/s`);
+    if (!f.visible) bits.push('hidden');
+    lines.push(`- \`${f.id}\` "${f.name}" ${bits.join(' · ')}`);
+    lines.push(`  ${src.kind}${src.params ? `(${kv(src.params)})` : ''}${chain ? ` → ${chain}` : ''}`);
+    if (c.style) lines.push(`  style: ${kv(c.style)}`);
   });
   return lines.join('\n');
 }
@@ -39,35 +42,47 @@ export function warningsBlock(warnings: string[]): string {
   return `\n\n**Corrections (${warnings.length})**: the design was saved with these fixes applied:\n${warnings.map((w) => `- ${w}`).join('\n')}`;
 }
 
-export function generatorsMarkdown(type?: string): string {
-  const all = describeGenerators().filter((g) => !type || g.type === type);
+type ParamInfo = ReturnType<typeof describeBlocks>['sources'][number]['params'][number];
+const paramLine = (p: ParamInfo) => {
+  const range = 'min' in p ? `${p.min}–${p.max}` : 'options' in p ? (p.options as string[]).join(' | ') : p.type;
+  const when = 'only_when' in p && p.only_when ? ` _(only when ${p.only_when.key} is ${p.only_when.in.join('/')})_` : '';
+  return `- \`${p.key}\` (${p.label}): ${range}, default ${fmt(p.default)}${when}`;
+};
+
+export function blocksMarkdown(kind?: string): string {
+  const b = describeBlocks();
   const out: string[] = [];
-  if (!type) {
+  if (!kind) {
     out.push(
-      '# Vectr generators',
+      '# Vectr building blocks',
       '',
-      'Each layer has a `type` (below), a position `x`,`y` (artboard pixels, centre of the shape), a `scale` (radius in pixels), ' +
-        'rotation `rx` (tilt), `ry` (turn), `rz` (roll) in degrees, `perspective` 0–1, plus `params` and `style`.',
+      'A form = one **source** (makes lines/points) → a stack of **operators** applied in order (max ' + b.limits.maxOps + ') → a **style**.',
+      'Forms also take x, y (artboard px, centre), scale (radius in px), rx/ry/rz (degrees), perspective 0–1.',
       '',
-      '**style**: `stroke` (colour, omit to use the document ink), `width` 0.1–40, `back` (how lines facing away are drawn: dotted | dashed | solid | faded | hidden), ' +
-        '`nodes` (bool), `nodeSize`, `backNodes` (bool), `labels` (bool), `labelSize`, `opacity` 0–1.',
-      '',
-      `**Themes**: ${THEMES.map((t) => `${t.id} (${t.background} / ${t.ink})`).join(', ')}`,
-      `**Templates**: ${TEMPLATES.map((t) => `${t.id} (${t.name})`).join(', ')}`,
+      `**Themes**: ${THEMES.map((t) => `${t.id} (bg ${t.background}, ramp ${t.ramp.join('→')})`).join('; ')}`,
+      `**Recipes**: ${RECIPES.map((r) => `${r.id} — ${r.blurb}`).join('; ')}`,
       '',
     );
   }
-  for (const g of all) {
-    out.push(`## ${g.type} (${g.name})`, g.description);
-    const tr = Object.entries(g.defaultTransform).map(([k, v]) => `${k}=${fmt(v)}`).join(', ');
-    if (tr) out.push(`Default rotation: ${tr}`);
-    for (const p of g.params) {
-      const range = 'min' in p ? `${p.min}–${p.max}` : 'options' in p ? p.options.join(' | ') : p.type;
-      out.push(`- \`${p.key}\` (${p.label}): ${range}, default ${fmt(p.default)}`);
+  const section = (title: string, list: typeof b.sources) => {
+    const shown = list.filter((x) => !kind || x.kind === kind);
+    if (!shown.length) return;
+    if (!kind) out.push(`## ${title}`, '');
+    for (const x of shown) {
+      out.push(`### ${x.kind} — ${x.name}`, x.description);
+      for (const p of x.params) out.push(paramLine(p));
+      out.push('');
     }
-    out.push('');
+  };
+  section('Sources', b.sources);
+  section('Operators', b.operators);
+  if (!kind || kind === 'style') {
+    out.push('## Style', `- \`stroke\`: ${b.style.stroke}`, `- \`ramp\`: ${b.style.ramp}`);
+    for (const p of b.style.params) out.push(paramLine(p as ParamInfo));
   }
   return out.join('\n');
 }
 
-export const GENERATOR_TYPES = GENERATORS.map((g) => g.type) as [string, ...string[]];
+export const SOURCE_KINDS = SOURCES.map((s) => s.kind) as [string, ...string[]];
+export const OP_KINDS = OPERATORS.map((o) => o.kind) as [string, ...string[]];
+export const BLOCK_KINDS = [...SOURCE_KINDS, ...OP_KINDS, 'style'] as [string, ...string[]];

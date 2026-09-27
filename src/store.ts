@@ -1,5 +1,8 @@
 import { create } from 'zustand';
-import { TEMPLATES, createLayer, parseDoc, randomParams, uid, type Doc, type Layer, type LayerStyle, type Params } from '@vectr/core';
+import {
+  RECIPES, createForm, createOp, opFor, parseDoc, sourceFor, uid,
+  type Doc, type Form, type FormSpec, type Op, type Params, type Style,
+} from '@vectr/core';
 
 export type Tool = 'move' | 'orbit';
 
@@ -8,6 +11,7 @@ interface State {
   selectedId: string | null;
   tool: Tool;
   playing: boolean;
+  mutateOpen: boolean;
   past: Doc[];
   future: Doc[];
 
@@ -19,48 +23,60 @@ interface State {
   select(id: string | null): void;
   setTool(t: Tool): void;
   togglePlay(): void;
+  setMutateOpen(open: boolean): void;
 
-  addLayer(type: string): void;
-  updateLayer(id: string, patch: Partial<Layer>, key?: string): void;
-  updateParams(id: string, patch: Params, key?: string): void;
-  updateStyle(id: string, patch: Partial<LayerStyle>, key?: string): void;
-  randomize(id: string): void;
-  resetLayer(id: string): void;
-  removeLayer(id: string): void;
-  duplicateLayer(id: string): void;
-  moveLayer(id: string, dir: -1 | 1): void;
-  loadTemplate(id: string): void;
+  addForm(spec: FormSpec): void;
+  updateForm(id: string, patch: Partial<Form>, key?: string): void;
+  updateSource(id: string, patch: Params, key?: string): void;
+  updateStyle(id: string, patch: Partial<Style>, key?: string): void;
+  replaceForm(id: string, form: Form): void;
+  removeForm(id: string): void;
+  duplicateForm(id: string): void;
+  moveForm(id: string, dir: -1 | 1): void;
+
+  addOp(formId: string, kind: string): void;
+  updateOp(formId: string, opId: string, patch: Partial<Op> & { params?: Params }, key?: string): void;
+  moveOp(formId: string, opId: string, dir: -1 | 1): void;
+  removeOp(formId: string, opId: string): void;
+  duplicateOp(formId: string, opId: string): void;
+
+  loadRecipe(id: string): void;
   /** Replace the document (undoable). Input is validated; returns warnings. */
   importDoc(input: unknown): string[];
 }
 
-const STORAGE_KEY = 'vectr:doc:v1';
+const STORAGE_KEY = 'vectr:doc:v2';
+const LEGACY_KEY = 'vectr:doc:v1';
 
 function loadDoc(): Doc {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    // Run saved data through the same validator as imports, so stale or
-    // hand-edited storage can never put the app in a broken state.
+    // Saved data goes through the same validator as imports; v1 saves are migrated.
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_KEY);
     if (raw) return parseDoc(raw).doc;
   } catch {
-    /* storage unavailable or corrupt — fall through to the starter template */
+    /* storage unavailable or corrupt — fall through to the first recipe */
   }
-  return TEMPLATES[0].build();
+  return RECIPES[0].build();
 }
 
 let lastKey: string | undefined;
 let lastTime = 0;
 
-const mapLayer = (d: Doc, id: string, fn: (l: Layer) => Layer): Doc => ({
-  ...d,
-  layers: d.layers.map((l) => (l.id === id ? fn(l) : l)),
-});
+const mapForm = (d: Doc, id: string, fn: (f: Form) => Form): Doc => ({ ...d, forms: d.forms.map((f) => (f.id === id ? fn(f) : f)) });
+const mapOps = (d: Doc, id: string, fn: (ops: Op[]) => Op[]) => mapForm(d, id, (f) => ({ ...f, ops: fn(f.ops) }));
+const swap = <T,>(list: T[], i: number, j: number) => {
+  if (i < 0 || j < 0 || i >= list.length || j >= list.length) return list;
+  const out = [...list];
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
+};
 
 export const useStore = create<State>((set, get) => ({
   doc: loadDoc(),
   selectedId: null,
   tool: 'move',
   playing: false,
+  mutateOpen: false,
   past: [],
   future: [],
 
@@ -79,12 +95,7 @@ export const useStore = create<State>((set, get) => ({
     if (!past.length) return;
     const prev = past[past.length - 1];
     lastKey = undefined;
-    set({
-      doc: prev,
-      past: past.slice(0, -1),
-      future: [doc, ...future],
-      selectedId: prev.layers.some((l) => l.id === selectedId) ? selectedId : null,
-    });
+    set({ doc: prev, past: past.slice(0, -1), future: [doc, ...future], selectedId: prev.forms.some((f) => f.id === selectedId) ? selectedId : null });
   },
   redo() {
     const { past, doc, future } = get();
@@ -93,76 +104,97 @@ export const useStore = create<State>((set, get) => ({
     set({ doc: future[0], past: [...past, doc], future: future.slice(1) });
   },
 
-  select: (id) => set({ selectedId: id }),
+  select: (id) => set({ selectedId: id, mutateOpen: id ? get().mutateOpen : false }),
   setTool: (tool) => set({ tool }),
   togglePlay: () => set((s) => ({ playing: !s.playing })),
+  setMutateOpen: (mutateOpen) => set({ mutateOpen: mutateOpen && get().selectedId !== null }),
 
-  addLayer(type) {
+  addForm(spec) {
     const { doc } = get();
-    const n = doc.layers.length;
-    const jitter = (n % 5) * 24;
-    const layer = createLayer(type, { x: doc.width / 2 + jitter, y: doc.height / 2 + jitter }, {
-      scale: Math.round(Math.min(doc.width, doc.height) * 0.28),
-    });
-    get().commit((d) => ({ ...d, layers: [...d.layers, layer] }));
-    set({ selectedId: layer.id });
+    const jitter = (doc.forms.length % 5) * 24;
+    const form = createForm(
+      { ...spec, transform: { scale: Math.round(Math.min(doc.width, doc.height) * 0.3), ...spec.transform } },
+      { x: doc.width / 2 + jitter, y: doc.height / 2 + jitter },
+    );
+    get().commit((d) => ({ ...d, forms: [...d.forms, form] }));
+    set({ selectedId: form.id });
   },
-  updateLayer(id, patch, key) {
-    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, ...patch })), key && `${id}:${key}`);
+  updateForm(id, patch, key) {
+    get().commit((d) => mapForm(d, id, (f) => ({ ...f, ...patch })), key && `${id}:${key}`);
   },
-  updateParams(id, patch, key) {
-    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, params: { ...l.params, ...patch } })), key && `${id}:p:${key}`);
+  updateSource(id, patch, key) {
+    get().commit((d) => mapForm(d, id, (f) => ({ ...f, source: { ...f.source, params: { ...f.source.params, ...patch } } })), key && `${id}:src:${key}`);
   },
   updateStyle(id, patch, key) {
-    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, style: { ...l.style, ...patch } })), key && `${id}:s:${key}`);
+    get().commit((d) => mapForm(d, id, (f) => ({ ...f, style: { ...f.style, ...patch } })), key && `${id}:st:${key}`);
   },
-  randomize(id) {
-    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, params: randomParams(l.type, l.params) })));
+  replaceForm(id, form) {
+    get().commit((d) => mapForm(d, id, () => ({ ...form, id })));
   },
-  resetLayer(id) {
-    get().commit((d) =>
-      mapLayer(d, id, (l) => {
-        const fresh = createLayer(l.type, { x: l.x, y: l.y }, { scale: l.scale });
-        return { ...fresh, id: l.id, name: l.name };
-      }),
-    );
+  removeForm(id) {
+    get().commit((d) => ({ ...d, forms: d.forms.filter((f) => f.id !== id) }));
+    if (get().selectedId === id) set({ selectedId: null, mutateOpen: false });
   },
-  removeLayer(id) {
-    get().commit((d) => ({ ...d, layers: d.layers.filter((l) => l.id !== id) }));
-    if (get().selectedId === id) set({ selectedId: null });
-  },
-  duplicateLayer(id) {
-    const src = get().doc.layers.find((l) => l.id === id);
+  duplicateForm(id) {
+    const src = get().doc.forms.find((f) => f.id === id);
     if (!src) return;
-    const copy: Layer = { ...src, id: uid(), name: `${src.name} copy`, x: src.x + 24, y: src.y + 24 };
+    const copy: Form = { ...src, id: uid('f'), name: `${src.name} copy`, x: src.x + 24, y: src.y + 24, ops: src.ops.map((o) => ({ ...o, id: uid('o') })) };
     get().commit((d) => {
-      const i = d.layers.findIndex((l) => l.id === id);
-      const layers = [...d.layers];
-      layers.splice(i + 1, 0, copy);
-      return { ...d, layers };
+      const i = d.forms.findIndex((f) => f.id === id);
+      const forms = [...d.forms];
+      forms.splice(i + 1, 0, copy);
+      return { ...d, forms };
     });
     set({ selectedId: copy.id });
   },
-  moveLayer(id, dir) {
+  moveForm(id, dir) {
     get().commit((d) => {
-      const i = d.layers.findIndex((l) => l.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= d.layers.length) return d;
-      const layers = [...d.layers];
-      [layers[i], layers[j]] = [layers[j], layers[i]];
-      return { ...d, layers };
+      const i = d.forms.findIndex((f) => f.id === id);
+      const forms = swap(d.forms, i, i + dir);
+      return forms === d.forms ? d : { ...d, forms };
     });
   },
-  loadTemplate(id) {
-    const t = TEMPLATES.find((x) => x.id === id);
-    if (!t) return;
-    get().commit(() => t.build());
-    set({ selectedId: null, playing: TEMPLATES.find((t) => t.id === id)!.build().layers.some((l) => l.spin !== 0) });
+
+  addOp(formId, kind) {
+    if (!opFor(kind)) return;
+    get().commit((d) => mapOps(d, formId, (ops) => [...ops, createOp(kind)]));
+  },
+  updateOp(formId, opId, patch, key) {
+    get().commit(
+      (d) => mapOps(d, formId, (ops) => ops.map((o) => (o.id === opId ? { ...o, ...patch, params: { ...o.params, ...patch.params } } : o))),
+      key && `${formId}:${opId}:${key}`,
+    );
+  },
+  moveOp(formId, opId, dir) {
+    get().commit((d) => mapOps(d, formId, (ops) => {
+      const i = ops.findIndex((o) => o.id === opId);
+      return swap(ops, i, i + dir);
+    }));
+  },
+  removeOp(formId, opId) {
+    get().commit((d) => mapOps(d, formId, (ops) => ops.filter((o) => o.id !== opId)));
+  },
+  duplicateOp(formId, opId) {
+    get().commit((d) => mapOps(d, formId, (ops) => {
+      const i = ops.findIndex((o) => o.id === opId);
+      if (i < 0) return ops;
+      const out = [...ops];
+      out.splice(i + 1, 0, { ...ops[i], id: uid('o') });
+      return out;
+    }));
+  },
+
+  loadRecipe(id) {
+    const r = RECIPES.find((x) => x.id === id);
+    if (!r) return;
+    const doc = r.build();
+    get().commit(() => doc);
+    set({ selectedId: null, mutateOpen: false, playing: doc.forms.some((f) => f.spin !== 0) });
   },
   importDoc(input) {
     const { doc, warnings } = parseDoc(input);
     get().commit(() => doc);
-    set({ selectedId: null, playing: doc.layers.some((l) => l.spin !== 0) });
+    set({ selectedId: null, mutateOpen: false, playing: doc.forms.some((f) => f.spin !== 0) });
     return warnings;
   },
 }));
@@ -181,4 +213,5 @@ useStore.subscribe((s, prev) => {
   }, 400);
 });
 
-export const selectedLayer = (s: State) => s.doc.layers.find((l) => l.id === s.selectedId) ?? null;
+export const selectedForm = (s: State) => s.doc.forms.find((f) => f.id === s.selectedId) ?? null;
+export const sourceName = (f: Form) => sourceFor(f.source.kind)?.name ?? f.source.kind;

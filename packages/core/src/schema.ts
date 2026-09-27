@@ -1,38 +1,44 @@
-import { DEFAULT_STYLE, GENERATORS, createLayer, generatorFor, uid } from './generators/index.js';
+import { isHex, normalizeHex } from './color.js';
+import { DEFAULT_TRANSFORM, createForm, defaultName, uid } from './forms.js';
 import { clamp } from './math.js';
-import { THEMES } from './templates.js';
-import type { BackStyle, Doc, Layer, LayerStyle, ParamDef, Params } from './types.js';
+import { migrateV1 } from './migrate.js';
+import { OPERATORS, opFor } from './operators/index.js';
+import { MAX_OPS } from './pipeline.js';
+import { RECIPES } from './recipes.js';
+import { SOURCES, sourceFor } from './sources/index.js';
+import { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
+import { THEMES } from './themes.js';
+import type { BlockDef, Doc, Form, ParamDef, Params, Style } from './types.js';
 
 /**
  * Turning untrusted input (a saved file, a share link, an agent's JSON) into a
- * valid Doc. Input may be partial: any missing field falls back to its default,
- * so `{ layers: [{ type: "sphere" }] }` is a complete design.
+ * valid Doc. Input may be partial: `{ forms: [{ source: { kind: "curve" } }] }` is
+ * a complete design. Vectr v1 files are migrated. Nothing is fatal except input that
+ * cannot be a design at all; every correction is reported as a warning.
  */
 
 export const FORMAT = 'vectr';
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 export const LIMITS = {
   minSize: 64,
   maxSize: 8000,
-  maxLayers: 200,
+  maxForms: 200,
   maxText: 200,
   maxName: 80,
+  maxRamp: 6,
 } as const;
 
 export interface ParseResult {
   doc: Doc;
-  /** Human-readable notes on anything that was dropped or corrected. */
   warnings: string[];
 }
-
-const BACK_STYLES: BackStyle[] = ['dotted', 'dashed', 'solid', 'faded', 'hidden'];
-const COLOR = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgb|hsl)a?\([\d\s.,%/+-]{1,60}\))$/i;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-export const isColor = (v: unknown): v is string => typeof v === 'string' && COLOR.test(v.trim());
+/** Colours are hex only in v2 (#rgb or #rrggbb). */
+export const isColor = isHex;
 
 function sanitizeParam(def: ParamDef, v: unknown, fallback: Params[string], warn: (m: string) => void): Params[string] {
   switch (def.kind) {
@@ -53,34 +59,43 @@ function sanitizeParam(def: ParamDef, v: unknown, fallback: Params[string], warn
   }
 }
 
-function sanitizeStyle(input: unknown, warn: (m: string) => void): Partial<LayerStyle> {
+/** Validate params against a block's schema; unknown keys are dropped with a warning. */
+function sanitizeParams(block: BlockDef, input: unknown, warn: (m: string) => void): Params {
+  if (input === undefined) return {};
+  if (!isObj(input)) return (warn('params should be an object'), {});
+  const out: Params = {};
+  for (const def of block.params) {
+    if (input[def.key] !== undefined) out[def.key] = sanitizeParam(def, input[def.key], block.defaults[def.key], warn);
+  }
+  for (const k of Object.keys(input)) {
+    if (!block.params.some((d) => d.key === k)) warn(`unknown ${block.name.toLowerCase()} param "${k}" ignored. Known: ${block.params.map((d) => d.key).join(', ')}`);
+  }
+  return out;
+}
+
+function sanitizeRamp(v: unknown, warn: (m: string) => void, what: string): string[] | undefined {
+  if (!Array.isArray(v)) return (warn(`${what} should be an array of hex colours`), undefined);
+  const ok = v.filter(isHex).map(normalizeHex).slice(0, LIMITS.maxRamp);
+  if (ok.length !== v.length) warn(`${what}: only hex colours (#rgb or #rrggbb) are kept, up to ${LIMITS.maxRamp}`);
+  return ok.length ? ok : undefined;
+}
+
+const STYLE_BLOCK: BlockDef = {
+  kind: 'style', name: 'Style', blurb: '', params: STYLE_PARAMS,
+  defaults: DEFAULT_STYLE as unknown as Params,
+};
+
+function sanitizeStyle(input: unknown, warn: (m: string) => void): Partial<Style> {
   if (input === undefined) return {};
   if (!isObj(input)) return (warn('style should be an object'), {});
-  const out: Partial<LayerStyle> = {};
-  const numField = (k: 'width' | 'nodeSize' | 'labelSize' | 'opacity', lo: number, hi: number) => {
-    if (input[k] === undefined) return;
-    if (finite(input[k])) out[k] = clamp(input[k] as number, lo, hi);
-    else warn(`style.${k} should be a number`);
-  };
-  numField('width', 0.1, 40);
-  numField('nodeSize', 0, 40);
-  numField('labelSize', 4, 96);
-  numField('opacity', 0, 1);
-  for (const k of ['nodes', 'backNodes', 'labels'] as const) {
-    if (input[k] === undefined) continue;
-    if (typeof input[k] === 'boolean') out[k] = input[k] as boolean;
-    else warn(`style.${k} should be true or false`);
+  const { stroke, ramp, ...rest } = input;
+  const out = sanitizeParams(STYLE_BLOCK, rest, (m) => warn(`style: ${m.replace(' style param', '')}`)) as Partial<Style>;
+  if (stroke !== undefined) {
+    if (stroke === null) out.stroke = null;
+    else if (isHex(stroke)) out.stroke = normalizeHex(stroke);
+    else warn('style.stroke must be a hex colour or null');
   }
-  if (input.back !== undefined) {
-    if (BACK_STYLES.includes(input.back as BackStyle)) out.back = input.back as BackStyle;
-    else warn(`style.back must be one of: ${BACK_STYLES.join(', ')}`);
-  }
-  if (input.stroke !== undefined) {
-    if (input.stroke === null) out.stroke = null;
-    else if (isColor(input.stroke)) out.stroke = input.stroke.trim();
-    else warn('style.stroke is not a valid colour');
-  }
-  for (const k of Object.keys(input)) if (!(k in DEFAULT_STYLE)) warn(`unknown style field "${k}" ignored`);
+  if (ramp !== undefined) out.ramp = ramp === null ? null : sanitizeRamp(ramp, warn, 'style.ramp') ?? null;
   return out;
 }
 
@@ -95,55 +110,76 @@ const TRANSFORM_RANGES = {
   spin: [-720, 720],
 } as const;
 
-const LAYER_KEYS = new Set(['id', 'type', 'name', 'visible', 'locked', 'params', 'style', ...Object.keys(TRANSFORM_RANGES)]);
+const FORM_KEYS = new Set(['id', 'name', 'visible', 'locked', 'source', 'ops', 'style', ...Object.keys(TRANSFORM_RANGES)]);
 
-function parseLayer(input: unknown, index: number, doc: Pick<Doc, 'width' | 'height'>, ids: Set<string>, warnings: string[]): Layer | null {
-  const where = `layers[${index}]`;
+function parseForm(input: unknown, index: number, doc: Pick<Doc, 'width' | 'height'>, ids: Set<string>, warnings: string[]): Form | null {
+  const where = `forms[${index}]`;
   if (!isObj(input)) return (warnings.push(`${where}: not an object, skipped`), null);
-  const type = input.type;
-  if (typeof type !== 'string' || !GENERATORS.some((g) => g.type === type)) {
-    warnings.push(`${where}: unknown type ${JSON.stringify(type)}, skipped. Known: ${GENERATORS.map((g) => g.type).join(', ')}`);
+  const rawSource = typeof input.source === 'string' ? { kind: input.source } : input.source;
+  const kind = isObj(rawSource) ? rawSource.kind : undefined;
+  const src = typeof kind === 'string' ? sourceFor(kind) : undefined;
+  if (!src || !isObj(rawSource)) {
+    warnings.push(`${where}: source.kind must be one of ${SOURCES.map((s) => s.kind).join(', ')}; got ${JSON.stringify(kind)}. Skipped`);
     return null;
   }
-  const warn = (m: string) => warnings.push(`${where} (${type}): ${m}`);
-  const g = generatorFor(type);
+  const warn = (m: string) => warnings.push(`${where} (${src.kind}): ${m}`);
+  const sourceParams = sanitizeParams(src, rawSource.params, warn);
 
-  const overrides: Partial<Layer> = {};
+  const ops: { kind: string; params: Params; enabled: boolean; id?: string }[] = [];
+  if (input.ops !== undefined && !Array.isArray(input.ops)) warn('ops should be an array');
+  const rawOps = Array.isArray(input.ops) ? input.ops : [];
+  if (rawOps.length > MAX_OPS) warn(`only the first ${MAX_OPS} operators were kept`);
+  rawOps.slice(0, MAX_OPS).forEach((o, i) => {
+    const oKind = isObj(o) ? o.kind : typeof o === 'string' ? o : undefined;
+    const def = typeof oKind === 'string' ? opFor(oKind) : undefined;
+    if (!def) {
+      warn(`ops[${i}]: kind must be one of ${OPERATORS.map((x) => x.kind).join(', ')}; got ${JSON.stringify(oKind)}. Skipped`);
+      return;
+    }
+    const obj = isObj(o) ? o : {};
+    ops.push({
+      kind: def.kind,
+      params: sanitizeParams(def, obj.params, (m) => warn(`ops[${i}] ${def.kind}: ${m}`)),
+      enabled: typeof obj.enabled === 'boolean' ? obj.enabled : true,
+      id: typeof obj.id === 'string' && /^[\w-]{1,64}$/.test(obj.id) ? obj.id : undefined,
+    });
+  });
+
+  const transform: Record<string, number> = {};
   for (const [k, [lo, hi]] of Object.entries(TRANSFORM_RANGES)) {
     const v = input[k];
     if (v === undefined) continue;
-    if (finite(v)) (overrides as Record<string, number>)[k] = clamp(v, lo, hi);
+    if (finite(v)) transform[k] = clamp(v, lo, hi);
     else warn(`"${k}" should be a number`);
   }
-  if (overrides.scale === undefined) overrides.scale = Math.round(Math.min(doc.width, doc.height) * 0.28);
+  for (const k of Object.keys(input)) if (!FORM_KEYS.has(k)) warn(`unknown field "${k}" ignored`);
 
-  const params: Params = {};
-  if (input.params !== undefined && !isObj(input.params)) warn('params should be an object');
-  const rawParams = isObj(input.params) ? input.params : {};
-  for (const def of g.params) {
-    if (rawParams[def.key] !== undefined) params[def.key] = sanitizeParam(def, rawParams[def.key], g.defaults[def.key], warn);
-  }
-  for (const k of Object.keys(rawParams)) if (!g.params.some((d) => d.key === k)) warn(`unknown param "${k}" ignored`);
-  for (const k of Object.keys(input)) if (!LAYER_KEYS.has(k)) warn(`unknown field "${k}" ignored`);
-
-  const layer = createLayer(type, { x: doc.width / 2, y: doc.height / 2 }, {
-    ...overrides,
-    params,
-    style: sanitizeStyle(input.style, warn) as LayerStyle,
+  const { spin, ...tr } = transform;
+  const form = createForm(
+    {
+      source: { kind: src.kind, params: sourceParams },
+      ops: ops.map(({ kind: k, params, enabled }) => ({ kind: k, params, enabled })),
+      style: sanitizeStyle(input.style, warn),
+      transform: { scale: Math.round(Math.min(doc.width, doc.height) * 0.3), ...tr },
+      spin,
+    },
+    { x: doc.width / 2, y: doc.height / 2 },
+  );
+  ops.forEach((o, i) => {
+    if (o.id) form.ops[i].id = o.id;
   });
-  if (typeof input.name === 'string' && input.name.trim()) layer.name = input.name.trim().slice(0, LIMITS.maxName);
-  if (typeof input.visible === 'boolean') layer.visible = input.visible;
-  if (typeof input.locked === 'boolean') layer.locked = input.locked;
-  if (typeof input.id === 'string' && /^[\w-]{1,64}$/.test(input.id) && !ids.has(input.id)) layer.id = input.id;
-  else if (layer.id === '' || ids.has(layer.id)) layer.id = uid();
-  ids.add(layer.id);
-  return layer;
+  if (typeof input.name === 'string' && input.name.trim()) form.name = input.name.trim().slice(0, LIMITS.maxName);
+  if (typeof input.visible === 'boolean') form.visible = input.visible;
+  if (typeof input.locked === 'boolean') form.locked = input.locked;
+  if (typeof input.id === 'string' && /^[\w-]{1,64}$/.test(input.id) && !ids.has(input.id)) form.id = input.id;
+  else if (ids.has(form.id)) form.id = uid('f');
+  ids.add(form.id);
+  return form;
 }
 
 /**
  * Parse anything that might be a Vectr design: a saved file (`{format, version, doc}`),
- * a bare Doc, or a partial spec written by hand or by an agent. Throws only when the
- * input can't be a design at all; everything else is corrected and reported in `warnings`.
+ * a bare Doc, a partial spec, or a Vectr v1 document (migrated).
  */
 export function parseDoc(input: unknown): ParseResult {
   const warnings: string[] = [];
@@ -162,41 +198,45 @@ export function parseDoc(input: unknown): ParseResult {
     raw = raw.doc;
   }
   if (!isObj(raw)) throw new Error('Expected a Vectr design object');
+  if (!Array.isArray(raw.forms) && raw.version !== 2 && (Array.isArray(raw.layers) || typeof raw.ink === 'string')) {
+    raw = migrateV1(raw, warnings);
+  }
+  const r = raw as Record<string, unknown>;
 
-  const theme = typeof raw.theme === 'string' ? THEMES.find((t) => t.id === raw.theme) : undefined;
-  if (raw.theme !== undefined && !theme) warnings.push(`unknown theme ${JSON.stringify(raw.theme)}. Known: ${THEMES.map((t) => t.id).join(', ')}`);
+  const theme = typeof r.theme === 'string' ? THEMES.find((t) => t.id === r.theme) : undefined;
+  if (r.theme !== undefined && !theme) warnings.push(`unknown theme ${JSON.stringify(r.theme)}. Known: ${THEMES.map((t) => t.id).join(', ')}`);
   const base = theme ?? THEMES[0];
 
   const size = (k: 'width' | 'height', d: number) => {
-    const v = raw[k];
+    const v = r[k];
     if (v === undefined) return d;
     if (!finite(v)) return (warnings.push(`${k} should be a number`), d);
     return Math.round(clamp(v, LIMITS.minSize, LIMITS.maxSize));
   };
-  const color = (k: 'background' | 'ink', d: string) => {
-    const v = raw[k];
-    if (v === undefined) return d;
-    if (isColor(v)) return v.trim();
-    warnings.push(`${k} is not a valid colour`);
-    return d;
-  };
+  let background = base.background;
+  if (r.background !== undefined) {
+    if (isHex(r.background)) background = normalizeHex(r.background);
+    else warnings.push('background must be a hex colour');
+  }
+  const ramp = r.ramp !== undefined ? sanitizeRamp(r.ramp, (m) => warnings.push(m), 'ramp') ?? [...base.ramp] : [...base.ramp];
 
   const doc: Doc = {
+    version: 2,
     width: size('width', 1200),
     height: size('height', 900),
-    background: color('background', base.background),
-    ink: color('ink', base.ink),
-    rough: finite(raw.rough) ? clamp(raw.rough, 0, 20) : base.rough,
-    layers: [],
+    background,
+    ramp,
+    rough: finite(r.rough) ? clamp(r.rough, 0, 20) : 0,
+    forms: [],
   };
 
-  if (raw.layers !== undefined && !Array.isArray(raw.layers)) warnings.push('layers should be an array');
-  const list = Array.isArray(raw.layers) ? raw.layers : [];
-  if (list.length > LIMITS.maxLayers) warnings.push(`only the first ${LIMITS.maxLayers} layers were kept`);
+  if (r.forms !== undefined && !Array.isArray(r.forms)) warnings.push('forms should be an array');
+  const list = Array.isArray(r.forms) ? r.forms : [];
+  if (list.length > LIMITS.maxForms) warnings.push(`only the first ${LIMITS.maxForms} forms were kept`);
   const ids = new Set<string>();
-  list.slice(0, LIMITS.maxLayers).forEach((l, i) => {
-    const layer = parseLayer(l, i, doc, ids, warnings);
-    if (layer) doc.layers.push(layer);
+  list.slice(0, LIMITS.maxForms).forEach((f, i) => {
+    const form = parseForm(f, i, doc, ids, warnings);
+    if (form) doc.forms.push(form);
   });
   return { doc, warnings };
 }
@@ -206,45 +246,61 @@ export function serializeDoc(doc: Doc): string {
   return JSON.stringify({ format: FORMAT, version: FORMAT_VERSION, doc }, null, 2);
 }
 
+const diff = (value: Params, defaults: Params) =>
+  Object.fromEntries(Object.entries(value).filter(([k, v]) => JSON.stringify(defaults[k]) !== JSON.stringify(v)));
+
 /**
  * Remove every value that equals its default. `parseDoc` restores them, so this is
  * the smallest faithful form, used by share links and handy for agents to read.
  */
 export function compactDoc(doc: Doc): Record<string, unknown> {
+  const defaultScale = Math.round(Math.min(doc.width, doc.height) * 0.3);
   return {
+    version: 2,
     width: doc.width,
     height: doc.height,
     background: doc.background,
-    ink: doc.ink,
-    rough: doc.rough,
-    layers: doc.layers.map((l) => {
-      const fresh = createLayer(l.type, { x: doc.width / 2, y: doc.height / 2 }, { scale: Math.round(Math.min(doc.width, doc.height) * 0.28) });
-      const out: Record<string, unknown> = { type: l.type };
-      for (const k of ['name', 'visible', 'locked', ...Object.keys(TRANSFORM_RANGES)] as (keyof Layer)[]) {
-        if (l[k] !== fresh[k]) out[k] = l[k];
+    ramp: doc.ramp,
+    ...(doc.rough ? { rough: doc.rough } : {}),
+    forms: doc.forms.map((f) => {
+      const src = sourceFor(f.source.kind)!;
+      const out: Record<string, unknown> = { source: { kind: f.source.kind } };
+      const sp = diff(f.source.params, src.defaults);
+      if (Object.keys(sp).length) (out.source as Record<string, unknown>).params = sp;
+      if (f.ops.length) {
+        out.ops = f.ops.map((o) => {
+          const op: Record<string, unknown> = { kind: o.kind };
+          const p = diff(o.params, opFor(o.kind)?.defaults ?? {});
+          if (Object.keys(p).length) op.params = p;
+          if (!o.enabled) op.enabled = false;
+          return op;
+        });
       }
-      const params = Object.fromEntries(Object.entries(l.params).filter(([k, v]) => fresh.params[k] !== v));
-      const style = Object.fromEntries(Object.entries(l.style).filter(([k, v]) => fresh.style[k as keyof LayerStyle] !== v));
-      if (Object.keys(params).length) out.params = params;
-      if (Object.keys(style).length) out.style = style;
+      const st = diff(f.style as unknown as Params, DEFAULT_STYLE as unknown as Params);
+      if (Object.keys(st).length) out.style = st;
+      if (f.name !== defaultName(f.source)) out.name = f.name;
+      if (!f.visible) out.visible = false;
+      if (f.locked) out.locked = true;
+      const tdef: Record<string, number> = { ...DEFAULT_TRANSFORM, x: doc.width / 2, y: doc.height / 2, scale: defaultScale, spin: 0 };
+      for (const k of Object.keys(TRANSFORM_RANGES)) {
+        const v = (f as unknown as Record<string, number>)[k];
+        if (v !== tdef[k]) out[k] = v;
+      }
       return out;
     }),
   };
 }
 
-/** A machine-readable catalogue of generators and their parameters, for agents and tools. */
-export function describeGenerators() {
-  return GENERATORS.map((g) => ({
-    type: g.type,
-    name: g.name,
-    description: g.blurb,
-    params: g.params.map((d) => {
-      const base = { key: d.key, label: d.label, default: g.defaults[d.key] };
+/** A machine-readable catalogue of every building block, for agents and tools. */
+export function describeBlocks() {
+  const params = (defs: ParamDef[], defaults: Params) =>
+    defs.map((d) => {
+      const base = { key: d.key, label: d.label, default: defaults[d.key], ...(d.when ? { only_when: d.when } : {}), ...(d.help ? { help: d.help } : {}) };
       switch (d.kind) {
         case 'range':
           return { ...base, type: 'number', min: d.min, max: d.max, step: d.step };
         case 'seed':
-          return { ...base, type: 'integer', min: 1, max: 999, note: 'random seed' };
+          return { ...base, type: 'integer', min: 1, max: 999 };
         case 'toggle':
           return { ...base, type: 'boolean' };
         case 'select':
@@ -252,8 +308,17 @@ export function describeGenerators() {
         case 'text':
           return { ...base, type: 'string', maxLength: LIMITS.maxText };
       }
-    }),
-    defaultTransform: { ...g.transform },
-    defaultStyle: { ...DEFAULT_STYLE, ...g.style },
-  }));
+    });
+  return {
+    sources: SOURCES.map((s) => ({ kind: s.kind, name: s.name, description: s.blurb, params: params(s.params, s.defaults) })),
+    operators: OPERATORS.map((o) => ({ kind: o.kind, name: o.name, description: o.blurb, params: params(o.params, o.defaults) })),
+    style: {
+      params: params(STYLE_PARAMS, DEFAULT_STYLE as unknown as Params),
+      stroke: 'hex colour or null (null = first ramp stop)',
+      ramp: `array of 1–${LIMITS.maxRamp} hex colours, or null to use the document ramp`,
+    },
+    themes: THEMES,
+    recipes: RECIPES.map((r) => ({ id: r.id, name: r.name, description: r.blurb })),
+    limits: { maxOps: MAX_OPS, ...LIMITS },
+  };
 }
