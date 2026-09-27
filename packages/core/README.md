@@ -11,7 +11,7 @@ import { parseDoc, docToSVG, describeGenerators, encodeDoc } from '@vectr/core';
 
 // 1. Describe a design. Only layer `type` is required; everything else has defaults.
 const { doc, warnings } = parseDoc({
-  theme: 'paper',                  // paper | chalk | mono | blueprint | ember
+  theme: 'signal',                 // graphite | signal | kiln | ozone | bloom
   width: 1200, height: 900,
   layers: [
     { type: 'revolve', x: 400, y: 450, scale: 180, rx: -18, params: { profile: 'vase' } },
@@ -41,7 +41,7 @@ const code = await encodeDoc(doc);   // → "v1.…", use as https://your-vectr/
 ```jsonc
 {
   "width": 1200, "height": 900,          // 64–8000
-  "theme": "chalk",                      // or set "background" / "ink" colours directly
+  "theme": "ozone",                      // or set "background" / "ink" colours directly
   "rough": 2,                            // hand-drawn wobble, 0–20
   "layers": [{
     "type": "sphere",                    // run `vectr generators` for the full list
@@ -66,7 +66,7 @@ const code = await encodeDoc(doc);   // → "v1.…", use as https://your-vectr/
 vectr render <design.json | ->  [-o out.svg]
 vectr check  <design.json | ->          # prints the normalised design
 vectr link   <design.json | ->  [--base URL]
-vectr template <specimen | globe | figure | icons | blank>
+vectr template <starter | blank>
 vectr generators
 ```
 

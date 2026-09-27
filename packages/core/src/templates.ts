@@ -10,11 +10,11 @@ export interface Theme {
 }
 
 export const THEMES: Theme[] = [
-  { id: 'paper', name: 'Paper', background: '#F3F2E9', ink: '#232323', rough: 0 },
-  { id: 'chalk', name: 'Chalk', background: '#050505', ink: '#E6E6E3', rough: 2.2 },
-  { id: 'mono', name: 'Mono', background: '#F0F0F0', ink: '#0A0A0A', rough: 0 },
-  { id: 'blueprint', name: 'Blueprint', background: '#173152', ink: '#D8E6F7', rough: 0 },
-  { id: 'ember', name: 'Ember', background: '#0E0E10', ink: '#FF6A3D', rough: 0 },
+  { id: 'graphite', name: 'Graphite', background: '#111214', ink: '#E8E9EC', rough: 0 },
+  { id: 'signal', name: 'Signal', background: '#F4F5F7', ink: '#3B4BFF', rough: 0 },
+  { id: 'kiln', name: 'Kiln', background: '#EDE6DD', ink: '#A4452C', rough: 0 },
+  { id: 'ozone', name: 'Ozone', background: '#0B1220', ink: '#5CE1E6', rough: 0 },
+  { id: 'bloom', name: 'Bloom', background: '#FFF8F3', ink: '#E0457B', rough: 0 },
 ];
 
 export interface Template {
@@ -30,61 +30,18 @@ const withTheme = (id: string, width: number, height: number, layers: Layer[]): 
 
 export const TEMPLATES: Template[] = [
   {
-    id: 'specimen',
-    name: 'Specimen row',
+    id: 'starter',
+    name: 'Twisted torus',
     build: () =>
-      withTheme('paper', 1600, 900, [
-        createLayer('revolve', { x: 250, y: 450 }, { scale: 118 }),
-        createLayer('truchet', { x: 525, y: 450 }, { scale: 96, params: { seed: 11 } }),
-        createLayer('vortex', { x: 800, y: 450 }, { scale: 118 }),
-        createLayer('arches', { x: 1075, y: 450 }, { scale: 112 }),
-        createLayer('grid', { x: 1350, y: 450 }, { scale: 112, style: { nodeSize: 3.4 } as never }),
-      ]),
-  },
-  {
-    id: 'globe',
-    name: 'Chalk globe',
-    build: () =>
-      withTheme('chalk', 1000, 1000, [
-        createLayer('sphere', { x: 500, y: 500 }, {
-          scale: 330, spin: 12,
-          params: { meridians: 7, parallels: 8, rings: 2, ringSize: 0.42, seed: 4 },
-          style: { back: 'solid', width: 1.1, nodes: false } as never,
+      withTheme('ozone', 1200, 900, [
+        createLayer('torus', { x: 600, y: 450 }, {
+          scale: 300, rx: -52, ry: 18, spin: 10,
+          params: { major: 0.66, minor: 0.3, tubes: 36, loops: 0, twist: 2.5 },
+          style: { back: 'faded', width: 1.2, nodes: false } as never,
         }),
       ]),
   },
-  {
-    id: 'figure',
-    name: 'Figure plate',
-    build: () =>
-      withTheme('chalk', 1200, 900, [
-        createLayer('frame', { x: 600, y: 440 }, { scale: 330, style: { labelSize: 10, width: 1 } as never }),
-        createLayer('orbits', { x: 600, y: 440 }, { scale: 330, style: { labelSize: 10, width: 1.1 } as never }),
-      ]),
-  },
-  {
-    id: 'icons',
-    name: 'Icon set',
-    build: () => {
-      const kinds: [string, Record<string, number | string | boolean>][] = [
-        ['squircle', { round: 0.55 }],
-        ['polygon', { sides: 6, round: 0.3 }],
-        ['star', { sides: 5, inner: 0.5, round: 0.25 }],
-        ['circle', { echoes: 3, spacing: 0.28, alternate: true }],
-        ['flower', { sides: 6, inner: 0.35 }],
-        ['blob', { inner: 0.6, seed: 9 }],
-      ];
-      return withTheme('mono', 1200, 900, kinds.map(([kind, extra], i) =>
-        createLayer('shape', { x: 300 + (i % 3) * 300, y: 300 + Math.floor(i / 3) * 300 }, {
-          name: kind[0].toUpperCase() + kind.slice(1),
-          scale: 64,
-          params: { kind, ...extra },
-          style: { width: 6, nodes: false } as never,
-        }),
-      ));
-    },
-  },
-  { id: 'blank', name: 'Blank canvas', build: () => withTheme('paper', 1200, 900, []) },
+  { id: 'blank', name: 'Blank canvas', build: () => withTheme('graphite', 1200, 900, []) },
 ];
 
 export const ARTBOARD_SIZES = [

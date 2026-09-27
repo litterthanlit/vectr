@@ -378,10 +378,10 @@ export const frame: Generator = {
     ] },
     { key: 'ticks', label: 'Ruler ticks', kind: 'range', min: 0, max: 40, step: 1 },
     { key: 'corners', label: 'Registration marks', kind: 'toggle' },
-    { key: 'fig', label: 'Figure label', kind: 'text', placeholder: 'FIG. 062.' },
+    { key: 'fig', label: 'Figure label', kind: 'text', placeholder: 'Optional' },
     { key: 'caption', label: 'Caption', kind: 'text', placeholder: 'Optional' },
   ],
-  defaults: { aspect: 1.45, crosshair: 'vertical', ticks: 0, corners: false, fig: 'FIG. 062.', caption: '' },
+  defaults: { aspect: 1.45, crosshair: 'vertical', ticks: 0, corners: false, fig: '', caption: '' },
   style: { width: 1, nodes: false },
   build(p) {
     const a = num(p, 'aspect');

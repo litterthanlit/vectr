@@ -157,7 +157,7 @@ export const useStore = create<State>((set, get) => ({
     const t = TEMPLATES.find((x) => x.id === id);
     if (!t) return;
     get().commit(() => t.build());
-    set({ selectedId: null, playing: id === 'globe' });
+    set({ selectedId: null, playing: TEMPLATES.find((t) => t.id === id)!.build().layers.some((l) => l.spin !== 0) });
   },
   importDoc(input) {
     const { doc, warnings } = parseDoc(input);

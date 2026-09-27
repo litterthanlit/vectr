@@ -96,7 +96,7 @@ const DocSettings = z
     width: z.number().optional().describe('Artboard width in px, 64–8000'),
     height: z.number().optional().describe('Artboard height in px, 64–8000'),
     theme: z.enum(THEMES.map((t) => t.id) as [string, ...string[]]).optional().describe('Sets background, ink and roughness together'),
-    background: z.string().optional().describe('Background colour, e.g. "#050505"'),
+    background: z.string().optional().describe('Background colour, e.g. "#111214"'),
     ink: z.string().optional().describe('Default line colour'),
     rough: z.number().optional().describe('Hand-drawn wobble, 0 (crisp) – 20'),
   })
@@ -149,7 +149,7 @@ Returns markdown by default, or JSON (response_format="json") with one entry per
 
 Choose at most one source (omit all for a blank canvas):
   - template: a starter composition (${TEMPLATES.map((t) => t.id).join(', ')})
-  - design: a JSON design, e.g. { "theme": "chalk", "width": 1000, "height": 1000, "layers": [{ "type": "sphere", "rx": 15 }] }
+  - design: a JSON design, e.g. { "theme": "ozone", "width": 1000, "height": 1000, "layers": [{ "type": "sphere", "rx": 15 }] }
   - share_link: a Vectr link or code containing "#d=v1.…"
   - file_path: a saved Vectr project (.json) inside the allowed folders
 "settings" (theme, size, colours) is applied on top of the source.

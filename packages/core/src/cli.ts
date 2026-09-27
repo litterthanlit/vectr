@@ -12,7 +12,7 @@ Usage
   vectr generators                                Print every generator and its params as JSON
 
 A design is JSON. Everything except layer "type" is optional:
-  { "theme": "chalk", "width": 1000, "height": 1000,
+  { "theme": "ozone", "width": 1000, "height": 1000,
     "layers": [{ "type": "sphere", "rx": 15, "ry": 30, "params": { "rings": 3 } }] }
 Themes: ${THEMES.map((t) => t.id).join(', ')}
 

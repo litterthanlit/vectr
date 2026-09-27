@@ -44,7 +44,7 @@ orbit it in 3D, export clean SVG.
 
 [`packages/mcp`](packages/mcp) is an MCP server. Run `npm run mcp` once, then start
 Claude Code in this repo; `.mcp.json` registers it. Ask for something like *"make a
-chalk poster with a globe and a twisted torus in a figure frame"* and Claude will build
+dark poster with a twisted torus orbiting a knot"* and Claude will build
 it, check the previews, and give you a link that opens it in the
 [live app](https://vectr-eight.vercel.app). See
 [packages/mcp/README.md](packages/mcp/README.md) for Claude Desktop setup and the tool list.
@@ -57,7 +57,7 @@ everything except each layer's `type` is optional:
 
 ```bash
 npm run build -w @vectr/core
-echo '{"theme":"chalk","layers":[{"type":"sphere","rx":15,"params":{"rings":3}}]}' \
+echo '{"theme":"ozone","layers":[{"type":"sphere","rx":15,"params":{"rings":3}}]}' \
   | npm run -s vectr -- render - -o globe.svg     # SVG file
 npm run -s vectr -- link design.json               # link that opens it in the app
 npm run -s vectr -- generators                     # every shape type and param, as JSON

@@ -312,7 +312,7 @@ export const orbits: Generator = {
   ],
   defaults: {
     rings: 5, minSize: 0.35, maxSize: 0.8, stretch: 1.45, shell: true, equator: true, axis: true,
-    labels: 'SQNESM-2; LATENT DIM. [1,3]; ANGULAR DIST. 78°', seed: 62,
+    labels: '', seed: 62,
   },
   transform: { rx: -8, ry: 0 },
   style: { back: 'dashed', nodes: false },

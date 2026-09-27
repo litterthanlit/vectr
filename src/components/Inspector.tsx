@@ -5,7 +5,7 @@ import type { BackStyle, Layer } from '@vectr/core';
 import { selectedLayer, useStore } from '../store';
 import { ColorField, IconButton, Section, Segmented, Select, Slider, TextField, Toggle } from './controls';
 
-const SWATCHES = ['#232323', '#F3F2E9', '#FF6A3D', '#2F6BFF', '#1FA37A', '#E8B931', '#B04BE0'];
+const SWATCHES = ['#E8E9EC', '#3B4BFF', '#A4452C', '#5CE1E6', '#E0457B', '#F5B83D', '#111214'];
 
 const BACK_OPTIONS: { value: BackStyle; label: string; icon: JSX.Element }[] = [
   { value: 'dotted', label: 'Dotted', icon: <LineGlyph dash="0 3.2" /> },
@@ -148,7 +148,7 @@ function DocInspector() {
             );
           })}
         </div>
-        <ColorField label="Background" value={doc.background} swatches={['#F3F2E9', '#F0F0F0', '#FFFFFF', '#050505', '#173152', '#0E0E10']} onChange={(v) => set({ background: v ?? doc.background }, 'bg')} />
+        <ColorField label="Background" value={doc.background} swatches={['#111214', '#0B1220', '#F4F5F7', '#EDE6DD', '#FFF8F3', '#FFFFFF']} onChange={(v) => set({ background: v ?? doc.background }, 'bg')} />
         <ColorField label="Ink" value={doc.ink} swatches={SWATCHES} onChange={(v) => set({ ink: v ?? doc.ink }, 'ink')} />
         <Slider label="Hand-drawn" min={0} max={8} step={0.1} value={doc.rough} onChange={(v) => set({ rough: v }, 'rough')} />
       </Section>

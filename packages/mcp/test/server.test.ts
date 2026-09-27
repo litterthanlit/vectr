@@ -51,16 +51,16 @@ describe('tool surface', () => {
 
 describe('design lifecycle', () => {
   it('creates from a template with a PNG preview and short layer ids', async () => {
-    const r = await call('vectr_create_design', { template: 'specimen', name: 'Row' });
+    const r = await call('vectr_create_design', { template: 'starter', name: 'Row' });
     expect(r.isError).toBeFalsy();
     const png = Buffer.from(imageOf(r)!.data, 'base64');
     expect(png.subarray(1, 4).toString()).toBe('PNG');
-    expect(textOf(r)).toMatch(/\*\*Row\*\* \(id `d1`\) · 1600×900 · theme paper/);
-    expect(textOf(r)).toMatch(/`L1` \*\*revolve\*\*/);
+    expect(textOf(r)).toMatch(/\*\*Row\*\* \(id `d1`\) · 1200×900 · theme ozone/);
+    expect(textOf(r)).toMatch(/`L1` \*\*torus\*\*/);
   });
 
   it('applies an atomic update and reports corrections instead of failing', async () => {
-    await call('vectr_create_design', { settings: { theme: 'chalk', width: 1000, height: 1000 }, preview: false });
+    await call('vectr_create_design', { settings: { theme: 'graphite', width: 1000, height: 1000 }, preview: false });
     const r = await call('vectr_update_design', {
       design_id: 'd1',
       add_layers: [
@@ -70,7 +70,7 @@ describe('design lifecycle', () => {
       preview: false,
     });
     expect(textOf(r)).toMatch(/unknown param "rigns"/);
-    expect(r.structuredContent).toMatchObject({ design_id: 'd1', design: { background: '#050505', layers: [{ id: 'L1', params: { meridians: 9 } }, { id: 'L2' }] } });
+    expect(r.structuredContent).toMatchObject({ design_id: 'd1', design: { background: '#111214', layers: [{ id: 'L1', params: { meridians: 9 } }, { id: 'L2' }] } });
 
     const r2 = await call('vectr_update_design', {
       design_id: 'd1',
@@ -90,18 +90,18 @@ describe('design lifecycle', () => {
   });
 
   it('gives actionable errors', async () => {
-    const r = await call('vectr_update_design', { design_id: 'd7', set: { theme: 'chalk' } });
+    const r = await call('vectr_update_design', { design_id: 'd7', set: { theme: 'graphite' } });
     expect(r.isError).toBe(true);
     expect(textOf(r)).toMatch(/Create one with vectr_create_design/);
-    const both = await call('vectr_create_design', { template: 'globe', design: {} });
+    const both = await call('vectr_create_design', { template: 'starter', design: {} });
     expect(textOf(both)).toMatch(/only one source/);
   });
 
   it('lists, inspects and deletes designs', async () => {
-    await call('vectr_create_design', { template: 'icons', preview: false });
-    expect(textOf(await call('vectr_list_designs'))).toMatch(/`d1` Design 1: 1200×900, 6 layers/);
+    await call('vectr_create_design', { design: { layers: [{ type: 'shape' }, { type: 'knot' }] }, preview: false });
+    expect(textOf(await call('vectr_list_designs'))).toMatch(/`d1` Design 1: 1200×900, 2 layers/);
     const json = JSON.parse(textOf(await call('vectr_get_design', { design_id: 'd1', response_format: 'json' })));
-    expect(json.layers).toHaveLength(6);
+    expect(json.layers).toHaveLength(2);
     await call('vectr_delete_design', { design_id: 'd1' });
     expect(textOf(await call('vectr_list_designs'))).toMatch(/No designs yet/);
   });
@@ -109,18 +109,18 @@ describe('design lifecycle', () => {
 
 describe('import and export', () => {
   it('round-trips through a share link', async () => {
-    await call('vectr_create_design', { template: 'figure', preview: false });
+    await call('vectr_create_design', { template: 'starter', preview: false });
     const url = textOf(await call('vectr_export_design', { design_id: 'd1', format: 'link' }));
     expect(url.startsWith('https://vectr.example/#d=v1.')).toBe(true);
     const { doc } = await decodeDoc(url.split('#')[1]);
-    expect(docToSVG(doc)).toBe(docToSVG(TEMPLATES.find((t) => t.id === 'figure')!.build()));
+    expect(docToSVG(doc)).toBe(docToSVG(TEMPLATES.find((t) => t.id === 'starter')!.build()));
 
     const reopened = await call('vectr_create_design', { share_link: url, preview: false });
-    expect(textOf(reopened)).toMatch(/`d2`[\s\S]*\*\*orbits\*\*/);
+    expect(textOf(reopened)).toMatch(/`d2`[\s\S]*\*\*torus\*\*/);
   });
 
   it('writes files inside the allowed folder and opens projects from it', async () => {
-    await call('vectr_create_design', { template: 'globe', preview: false });
+    await call('vectr_create_design', { template: 'starter', preview: false });
     for (const [format, file] of [['svg', 'out/globe.svg'], ['png', 'out/globe.png'], ['json', 'out/globe.json']]) {
       const r = await call('vectr_export_design', { design_id: 'd1', format, file_path: file, png_scale: 0.5 });
       expect(r.isError).toBeFalsy();
@@ -128,13 +128,13 @@ describe('import and export', () => {
     }
     expect(readFileSync(join(root, 'out/globe.svg'), 'utf8')).toMatch(/^<svg xmlns/);
     const r = await call('vectr_create_design', { file_path: 'out/globe.json', preview: false });
-    expect(textOf(r)).toMatch(/`d2`[\s\S]*\*\*sphere\*\*/);
+    expect(textOf(r)).toMatch(/`d2`[\s\S]*\*\*torus\*\*/);
   });
 
   it('returns small SVG inline and refuses oversized inline output', async () => {
     await call('vectr_create_design', { design: { layers: [{ type: 'shape' }] }, preview: false });
     expect(textOf(await call('vectr_export_design', { design_id: 'd1', format: 'svg' }))).toMatch(/^<svg/);
-    await call('vectr_create_design', { template: 'specimen', preview: false });
+    await call('vectr_create_design', { design: { layers: [{ type: 'torus', params: { tubes: 48, loops: 24 } }, { type: 'grid', params: { rows: 40, cols: 40 } }, { type: 'sphere', params: { meridians: 24, parallels: 24 } }] }, preview: false });
     const big = await call('vectr_export_design', { design_id: 'd2', format: 'svg' });
     expect(big.isError).toBe(true);
     expect(textOf(big)).toMatch(/Pass file_path/);
@@ -177,7 +177,7 @@ describe('stdio binary', () => {
     });
     const c = new Client({ name: 'stdio-test', version: '1.0.0' });
     await c.connect(transport);
-    const r = (await c.callTool({ name: 'vectr_create_design', arguments: { template: 'globe', preview_width: 200 } })) as CallToolResult;
+    const r = (await c.callTool({ name: 'vectr_create_design', arguments: { template: 'starter', preview_width: 200 } })) as CallToolResult;
     expect(r.content.some((x) => x.type === 'image')).toBe(true);
     await c.close();
   }, 60_000);

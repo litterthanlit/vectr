@@ -9,9 +9,9 @@ import {
 
 describe('parseDoc', () => {
   it('turns a minimal agent spec into a full design', () => {
-    const { doc, warnings } = parseDoc({ theme: 'chalk', layers: [{ type: 'sphere', params: { rings: 3 } }] });
+    const { doc, warnings } = parseDoc({ theme: 'ozone', layers: [{ type: 'sphere', params: { rings: 3 } }] });
     expect(warnings).toEqual([]);
-    expect(doc.background).toBe('#050505');
+    expect(doc.background).toBe('#0B1220');
     expect(doc.layers[0]).toMatchObject({ type: 'sphere', x: 600, y: 450, visible: true });
     expect(doc.layers[0].params).toMatchObject({ rings: 3, meridians: 6 });
   });
@@ -20,7 +20,7 @@ describe('parseDoc', () => {
     const t = TEMPLATES[0].build();
     const { doc } = parseDoc(serializeDoc(t));
     expect(doc.layers.map((l) => l.id)).toEqual(t.layers.map((l) => l.id));
-    expect(doc.layers[2].params).toEqual(t.layers[2].params);
+    expect(doc.layers[0].params).toEqual(t.layers[0].params);
   });
 
   it('corrects bad values and explains what it did', () => {
@@ -47,7 +47,7 @@ describe('parseDoc', () => {
       background: '"/><script>alert(1)</script>',
       layers: [{ type: 'shape', style: { stroke: 'red" onload="x' } }],
     });
-    expect(doc.background).toBe('#F3F2E9');
+    expect(doc.background).toBe('#111214');
     expect(doc.layers[0].style.stroke).toBeNull();
     expect(warnings).toHaveLength(2);
   });
@@ -125,7 +125,7 @@ describe('cli', () => {
   it('prints templates that render back to the same art', () => {
     const dir = mkdtempSync(join(tmpdir(), 'vectr-'));
     const file = join(dir, 'fig.json');
-    writeFileSync(file, run(['template', 'figure']));
-    expect(run(['render', file]).trim()).toBe(docToSVG(TEMPLATES.find((t) => t.id === 'figure')!.build()));
+    writeFileSync(file, run(['template', 'starter']));
+    expect(run(['render', file]).trim()).toBe(docToSVG(TEMPLATES.find((t) => t.id === 'starter')!.build()));
   });
 });
