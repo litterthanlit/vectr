@@ -58,7 +58,7 @@ claude mcp add vectr -e VECTR_ALLOWED_DIRS=$HOME/Desktop -- node /path/to/vectr/
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VECTR_ALLOWED_DIRS` | working directory | Folders the server may read projects from and write exports to (separate with `,` or `:`). Paths are resolved through symlinks, so nothing outside these folders is reachable. |
-| `VECTR_APP_URL` | `http://localhost:5173/` | Where share links point. Set this to your deployed Vectr. |
+| `VECTR_APP_URL` | `https://vectr-eight.vercel.app/` | Where share links point. Use `http://localhost:5173/` when running the app locally. |
 
 ## Notes
 

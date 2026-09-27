@@ -5,7 +5,7 @@
       "args": ["packages/mcp/dist/index.js"],
       "env": {
         "VECTR_ALLOWED_DIRS": ".",
-        "VECTR_APP_URL": "http://localhost:5173/"
+        "VECTR_APP_URL": "https://vectr-eight.vercel.app/"
       }
     }
   }

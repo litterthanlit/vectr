@@ -47,7 +47,7 @@ async function main(argv: string[]) {
       process.stdout.write(serializeDoc(load()) + '\n');
       return;
     case 'link':
-      process.stdout.write((await shareURL(load(), flag(args, '--base') ?? 'http://localhost:5173/')) + '\n');
+      process.stdout.write((await shareURL(load(), flag(args, '--base') ?? 'https://vectr-eight.vercel.app/')) + '\n');
       return;
     case 'template': {
       const t = TEMPLATES.find((x) => x.id === args[0]);

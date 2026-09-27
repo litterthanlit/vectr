@@ -3,6 +3,8 @@
 Generative vector shapes without the pen tool. Pick a generator, turn a few dials,
 orbit it in 3D, export clean SVG.
 
+**Live:** https://vectr-eight.vercel.app
+
 ![Vectr](docs/screenshot.png)
 
 ## What it does
@@ -43,7 +45,8 @@ orbit it in 3D, export clean SVG.
 [`packages/mcp`](packages/mcp) is an MCP server. Run `npm run mcp` once, then start
 Claude Code in this repo; `.mcp.json` registers it. Ask for something like *"make a
 chalk poster with a globe and a twisted torus in a figure frame"* and Claude will build
-it, check the previews, and give you a link that opens it here. See
+it, check the previews, and give you a link that opens it in the
+[live app](https://vectr-eight.vercel.app). See
 [packages/mcp/README.md](packages/mcp/README.md) for Claude Desktop setup and the tool list.
 
 ### Library and CLI
