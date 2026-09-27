@@ -38,6 +38,21 @@ const LOOKS: Record<string, ShapeLook> = {
   shape: { transform: { rx: 0, ry: 0 }, style: { width: 3 } },
   spirograph: { transform: { rx: 0, ry: 0 }, style: { width: 1 } },
   frame: { transform: { rx: 0, ry: 0 }, style: { width: 1, markers: 'none' } },
+  hyperboloid: { transform: { rx: 14, ry: 0 }, style: { width: 1.1, markers: 'none' } },
+  saddle: { transform: { rx: 30, ry: 35 }, style: { width: 1.1, markers: 'none' } },
+  mobius: { transform: { rx: 38, ry: 12 }, style: { width: 1.2 } },
+  klein: { transform: { rx: 25, ry: 20 }, style: { width: 1 } },
+  seashell: { transform: { rx: 14, ry: 30 }, style: { width: 1 } },
+  helix: { transform: { rx: -8, ry: 0, rz: -18 }, style: { markerSize: 2.4 } },
+  polyhedron: { transform: { rx: 18, ry: 24 }, style: { markerSize: 3 } },
+  superquadric: { transform: { rx: 22, ry: 30 }, style: { width: 1.1 } },
+  attractor: { transform: { rx: -8, ry: 20 }, style: { width: 0.7, hidden: 'solid', markerSize: 0.8 } },
+  harmonograph: { transform: { rx: 0, ry: 0 }, style: { width: 0.8 } },
+  flowfield: { transform: { rx: 0, ry: 0 }, style: { width: 1.2 } },
+  contours: { transform: { rx: 55, ry: 20 }, style: { width: 1.1 } },
+  plant: { transform: { rx: 0, ry: 0 }, style: { width: 1.1, markerSize: 2 } },
+  spacefill: { transform: { rx: 0, ry: 0 }, style: { width: 1.4 } },
+  superformula: { transform: { rx: 0, ry: 0 }, style: { width: 1.2 } },
 };
 
 const BASE_TRANSFORM: Partial<Transform> = { scale: 160, rx: 0, ry: 0, rz: 0, perspective: 0 };

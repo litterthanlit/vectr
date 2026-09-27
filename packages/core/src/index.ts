@@ -8,7 +8,7 @@
  * serialiser writes it out. The app and any agent or script share this code path.
  */
 export * from './types.js';
-export { BLOCK_SOURCES, SHAPE_SOURCES, SOURCES, sourceFor } from './sources/index.js';
+export { BLOCK_SOURCES, SHAPE_CATEGORIES, SHAPE_SOURCES, SOURCES, sourceFor } from './sources/index.js';
 export { SHAPE_STYLE, shapeStarter, shapeStyle, shapeTransform } from './shapes.js';
 export { OPERATORS, opFor } from './operators/index.js';
 export { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';

@@ -1,15 +1,25 @@
 import {
-  ChevronDown, ChevronRight, ChevronUp, Copy, Eye, EyeOff, Plus, Sparkles, Trash2,
+  BookmarkPlus, ChevronDown, ChevronRight, ChevronUp, Copy, Eye, EyeOff, Plus, Sparkles, Trash2, TriangleAlert,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  ARTBOARD_SIZES, MAX_OPS, OPERATORS, STYLE_PARAMS, THEMES, opFor, sourceFor,
+  ARTBOARD_SIZES, MAX_OPS, OPERATORS, STYLE_PARAMS, THEMES, buildForm, opFor, sourceFor,
   type Doc, type Form, type Op, type ParamDef, type Style,
 } from '@vectr/core';
+import { usePresets } from '../presets';
 import { selectedForm, useStore } from '../store';
 import { ColorField, IconButton, Section, Slider, Toggle } from './controls';
 import { ParamFields } from './ParamFields';
 import { RampEditor, rampCSS } from './RampEditor';
+
+/** One-click line looks, named after the pens they imitate. */
+const PENS: { name: string; hint: string; style: Partial<Style> }[] = [
+  { name: 'Hairline', hint: 'Very fine, hidden lines fade', style: { width: 0.5, taper: 'none', hidden: 'fade', markerSize: 1.6 } },
+  { name: 'Fineliner', hint: 'Fine ink, hidden lines dotted', style: { width: 1, taper: 'none', hidden: 'dotted', markerSize: 2.4 } },
+  { name: 'Technical', hint: 'Even ink, hidden lines dashed', style: { width: 1.5, taper: 'none', hidden: 'dashed', markerSize: 3.2 } },
+  { name: 'Marker', hint: 'Bold, hidden lines fade', style: { width: 3, taper: 'none', hidden: 'fade', markerSize: 4.5 } },
+  { name: 'Brush', hint: 'Swells and thins along each line', style: { width: 2.4, taper: 't', taperAmount: 0.85, hidden: 'fade', markerSize: 3 } },
+];
 
 const STYLE_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'Line', keys: ['width', 'taper', 'taperAmount', 'hidden'] },
@@ -158,8 +168,25 @@ function Pipeline({ form }: { form: Form }) {
           );
         })}
       </ol>
+      <BuildWarnings form={form} />
       <AddOperator form={form} />
     </Section>
+  );
+}
+
+/** Problems building the form (a formula typo, a thinned stack), shown where they're fixed. */
+function BuildWarnings({ form }: { form: Form }) {
+  const { warnings } = buildForm(form);
+  if (!warnings.length) return null;
+  return (
+    <ul role="status" className="mt-2 space-y-1 rounded-lg bg-amber-400/[0.07] px-2.5 py-2 ring-1 ring-amber-300/20">
+      {warnings.map((w) => (
+        <li key={w} className="flex gap-1.5 text-[11px] leading-snug text-amber-200/90">
+          <TriangleAlert size={12} className="mt-px shrink-0" aria-hidden="true" />
+          <span>{w}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -173,6 +200,25 @@ function StyleSections({ form, doc }: { form: Form; doc: Doc }) {
     <>
       {STYLE_GROUPS.map((g) => (
         <Section key={g.title} title={g.title}>
+          {g.title === 'Line' && (
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Pen presets">
+              {PENS.map((pen) => {
+                const on = Object.entries(pen.style).every(([k, v]) => values[k] === v);
+                return (
+                  <button
+                    key={pen.name}
+                    type="button"
+                    title={pen.hint}
+                    aria-pressed={on}
+                    onClick={() => updateStyle(form.id, pen.style)}
+                    className={`rounded-md px-2 py-1 text-[11px] ring-1 transition ${on ? 'bg-accent/15 text-white ring-accent/60' : 'text-zinc-400 ring-white/10 hover:text-zinc-100 hover:ring-white/20'}`}
+                  >
+                    {pen.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <ParamFields defs={STYLE_PARAMS} values={values} only={inGroup(g.keys)} onChange={set} />
           {g.title === 'Colour' &&
             (st.color === 'ramp' ? (
@@ -185,7 +231,7 @@ function StyleSections({ form, doc }: { form: Form; doc: Doc }) {
                 )}
               </>
             ) : (
-              <ColorField label="Line colour" value={st.stroke} swatches={doc.ramp} allowInherit inheritLabel="Theme ink" onChange={(c) => set('stroke', c)} />
+              <ColorField label="Line colour" value={st.stroke} swatches={doc.ramp} allowInherit inheritLabel="Theme ink" inherited={doc.ramp[doc.ramp.length - 1]} onChange={(c) => set('stroke', c)} />
             ))}
         </Section>
       ))}
@@ -197,6 +243,7 @@ function FormInspector({ form }: { form: Form }) {
   const { updateForm, setMutateOpen } = useStore.getState();
   const doc = useStore((s) => s.doc);
   const mutateOpen = useStore((s) => s.mutateOpen);
+  const [saved, setSaved] = useState('');
   const T = (k: keyof Form) => (v: number) => updateForm(form.id, { [k]: v } as Partial<Form>, String(k));
   return (
     <>
@@ -208,6 +255,19 @@ function FormInspector({ form }: { form: Form }) {
           onChange={(e) => updateForm(form.id, { name: e.target.value }, 'name')}
           className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-1 text-[15px] font-medium text-white outline-none ring-1 ring-transparent hover:ring-white/10 focus:ring-accent/70"
         />
+        <IconButton
+          label="Save as shape"
+          onClick={() => {
+            const name = window.prompt('Save as shape. Name:', form.name);
+            if (name !== null) {
+              usePresets.getState().save(form, name);
+              setSaved(`Saved “${name.trim() || form.name}” to My shapes`);
+            }
+          }}
+          className="h-8 min-w-8"
+        >
+          <BookmarkPlus size={15} />
+        </IconButton>
         <button
           type="button"
           onClick={() => setMutateOpen(!mutateOpen)}
@@ -220,6 +280,7 @@ function FormInspector({ form }: { form: Form }) {
           <Sparkles size={13} /> Mutate
         </button>
       </div>
+      <p role="status" className="px-4 pt-2 text-[11px] text-zinc-500 empty:hidden">{saved}</p>
       <Pipeline form={form} />
       <StyleSections form={form} doc={doc} />
       <Section title="Rotation & camera">

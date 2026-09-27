@@ -142,10 +142,12 @@ export function TextField({ label, value, placeholder, onChange }: { label: stri
 }
 
 export function ColorField({
-  label, value, swatches, onChange, allowInherit, inheritLabel = 'Ink',
+  label, value, swatches, onChange, allowInherit, inheritLabel = 'Ink', inherited,
 }: {
   label: string; value: string | null; swatches: string[]; onChange(v: string | null): void;
   allowInherit?: boolean; inheritLabel?: string;
+  /** The colour used when nothing is set (defaults to the first swatch). */
+  inherited?: string;
 }) {
   const id = useId();
   return (
@@ -157,7 +159,7 @@ export function ColorField({
           <input
             id={id}
             type="color"
-            value={value ?? swatches[0]}
+            value={value ?? inherited ?? swatches[0]}
             onChange={(e) => onChange(e.target.value)}
             className="h-6 w-6 cursor-pointer rounded-md border-0 bg-transparent p-0"
           />

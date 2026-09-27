@@ -44,8 +44,20 @@ export function buildForm(form: Pick<Form, 'source' | 'ops'>): BuildResult {
   }
   const warnings: string[] = [];
   const src = sourceFor(form.source.kind);
-  let g: Geometry = src ? src.build(form.source.params) : { lines: [], nodes: [] };
+  let g: Geometry = { lines: [], nodes: [] };
   if (!src) warnings.push(`unknown source "${form.source.kind}"`);
+  else {
+    try {
+      g = src.build(form.source.params);
+    } catch (e) {
+      // A bad formula (or any other source failure) leaves an empty form and says why.
+      warnings.push(`${src.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (pointCount(g) > POINT_BUDGET) {
+      warnings.push(`${src.name} produced more than ${POINT_BUDGET.toLocaleString('en-US')} points; the form was thinned to stay fast`);
+      g = thin(g, POINT_BUDGET);
+    }
+  }
   for (const op of form.ops.slice(0, MAX_OPS)) {
     if (!op.enabled) continue;
     const def = opFor(op.kind);

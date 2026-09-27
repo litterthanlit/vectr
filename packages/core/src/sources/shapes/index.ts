@@ -1,6 +1,8 @@
-import type { Geometry, SourceDef } from '../../types.js';
+import type { Geometry, Params, SourceDef } from '../../types.js';
+import { attractor, contours, flowfield, harmonograph, plant, spacefill, superformula } from './fields.js';
 import { arches, flowgrid, frame, maze, shape, spirograph } from './planar.js';
 import { funnel, globe, knot, orbits, torus, vortex } from './spatial.js';
+import { helix, hyperboloid, klein, mobius, polyhedron, saddle, seashell, superquadric } from './surfaces.js';
 
 /**
  * Give ready-made shape geometry what the v2 styling reads: position along each
@@ -20,9 +22,17 @@ function annotate(g: Geometry): Geometry {
   };
 }
 
-const asShape = (def: SourceDef): SourceDef => ({ ...def, group: 'shape', build: (p) => annotate(def.build(p)) });
+const GROUPS: { id: string; name: string; shapes: SourceDef[] }[] = [
+  { id: 'solids', name: 'Solids & surfaces', shapes: [globe, funnel, torus, polyhedron, superquadric, hyperboloid, saddle, mobius, klein, seashell] },
+  { id: 'motion', name: 'Curves & motion', shapes: [vortex, helix, knot, orbits, arches, spirograph, harmonograph, attractor] },
+  { id: 'fields', name: 'Fields & growth', shapes: [flowgrid, maze, flowfield, contours, plant, spacefill] },
+  { id: 'plates', name: 'Plates', shapes: [shape, superformula, frame] },
+];
 
 /** Complete, recognisable objects: one click to add, and every operator still applies. */
-export const SHAPES: SourceDef[] = [
-  globe, funnel, vortex, torus, knot, orbits, arches, flowgrid, maze, shape, spirograph, frame,
-].map(asShape);
+export const SHAPES: SourceDef[] = GROUPS.flatMap((c) =>
+  c.shapes.map((def) => ({ ...def, group: 'shape' as const, category: c.id, build: (p: Params) => annotate(def.build(p)) })),
+);
+
+/** Library sections, in display order. */
+export const SHAPE_CATEGORIES = GROUPS.map((c) => ({ id: c.id, name: c.name, shapes: SHAPES.filter((s) => s.category === c.id) }));

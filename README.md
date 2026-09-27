@@ -13,29 +13,46 @@ and colour do the drawing. Export clean SVG.
 Every form is a small pipeline:
 
 ```
-source            →  operators, applied top to bottom          →  style
-12 shapes, or        revolve · sweep · repeat · mirror · warp      plain ink with dotted hidden
-curve · lattice      jitter · connect · tile · scatter · resample  lines, or weight and colour that
-points · note                                                      follow depth, ribbons, markers
+source              →  operators, top to bottom                  →  style
+27 shapes, or          revolve · sweep · extrude · repeat · mirror   plain ink with dotted hidden
+curve · lattice        kaleidoscope · warp · jitter · smooth         lines, pen presets, or weight
+points · formula       connect · tile · scatter · offset · hatch     and colour that follow depth,
+note                   resample                                      ribbons, markers
 ```
 
 A circle revolved with an offset is a torus; add a twist warp and it corkscrews. A wave
 repeated in depth with ribbon fills becomes strata. Points on a sphere, linked to their
 nearest neighbours, become a constellation.
 
-- **12 ready-made shapes**, one click each: Globe, Funnel, Vortex, Torus, Knot, Orbits,
-  Arches, Flow grid, Maze, Shape, Spirograph, Frame. Each has its own settings (whiskers,
-  orbit rings, construction lines, trajectory arrows…) and is drawn in plain ink with
-  dotted hidden lines and nodes. Operators work on them too: repeat a funnel, twist a globe.
-- **4 building blocks, 10 operators**, each with its own settings, reorderable and toggleable.
+- **27 ready-made shapes** in four searchable groups, one click each:
+  - *Solids & surfaces*: Globe, Funnel, Torus, Polyhedron (Platonic solids and geodesic
+    spheres), Superquadric, Tower (a ruled hyperboloid), Saddle, Möbius, Klein bottle, Seashell
+  - *Curves & motion*: Vortex, Helix, Knot, Orbits, Arches, Spirograph, Harmonograph,
+    Attractor (Lorenz, Aizawa, Thomas, Halvorsen, Clifford, de Jong)
+  - *Fields & growth*: Flow grid, Maze, Flow field, Contours, Plant (L-systems, optionally
+    in 3D), Space-filling curves (Hilbert, Peano, Gosper, dragon, snowflake)
+  - *Plates*: Shape, Superformula, Frame
+
+  All are built from public mathematics, drawn in plain ink with dotted hidden lines,
+  and take operators like any other form.
+- **Formula**: type your own curve `x(t), y(t), z(t)` or surface `x(u,v)…` with sliders
+  `a`, `b`, `c`. It is a small maths-only language (never run as code), and mistakes show
+  up as a readable warning.
+- **5 building blocks, 15 operators**, each with its own settings, reorderable and
+  toggleable. New: Extrude, Kaleidoscope, Smooth, Offset and Hatch (parallel or cross
+  hatching clipped to any closed outline, holes included).
+- **My shapes**: save any tuned form as your own shape, then rename, delete, export or
+  import them as a JSON file.
+- **Pen presets**: Hairline, Fineliner, Technical, Marker and Brush set line weight,
+  hidden-line style and taper in one click.
 - **A signature style**: lines thin and lighten with depth, colour runs along an OKLab
   ramp (by depth, along the line, or per copy), back faces fade, optional ribbon fills
   between neighbouring lines and markers on points. Classic dotted or dashed hidden
   lines are still one setting away.
 - **Mutate**: press `M` to see six variations of the selected form, click one to adopt
   it, and keep evolving. Subtle, medium or wild.
-- **Recipes**: nine starting points (Field study, Pulse bloom, Strata, Constellation,
-  Tidal field, Coil garden, Vessel, Meander, Loom knot).
+- **Recipes**: twelve starting points (Field study, Cabinet, Field notes, Strange orbit,
+  Pulse bloom, Strata, Constellation, Tidal field, Coil garden, Vessel, Meander, Loom knot).
 - **Themes**: Graphite, Signal, Kiln, Ozone, Bloom. Each is a background plus a colour
   ramp, and the interface accent follows it.
 - **Export and share**: SVG, SVG to clipboard, 2× PNG, project JSON, or a share link that
@@ -99,8 +116,9 @@ npm run build
 
 ```
 packages/core/src/
-  sources/      12 ready-made shapes; curve (15 shapes), lattice, points, note → polylines
-                with t / family / band
+  sources/      27 ready-made shapes; curve (15 shapes), lattice, points, formula, note
+                → polylines with t / family / band
+  expr.ts       the Formula source's maths-only expression parser (no eval)
   operators/    pure (geometry, params) → geometry functions, each with a param schema
   pipeline.ts   source → enabled ops, cached, with a point budget so any stack stays fast
   render.ts     project, split visible/hidden, bucket segments by depth and colour

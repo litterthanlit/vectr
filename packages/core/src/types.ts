@@ -68,6 +68,8 @@ export interface BlockDef {
   blurb: string;
   /** Sources only: a bare building block, or a complete ready-made shape. */
   group?: 'block' | 'shape';
+  /** Shapes only: the section of the shape library it belongs to. */
+  category?: string;
   params: ParamDef[];
   defaults: Params;
 }

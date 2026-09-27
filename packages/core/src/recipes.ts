@@ -35,6 +35,38 @@ export const RECIPES: Recipe[] = [
     ]),
   },
   {
+    id: 'cabinet',
+    name: 'Cabinet',
+    blurb: 'Six solids and surfaces laid out in two rows',
+    build: () => doc('signal', [
+      { ...shapeStarter('polyhedron', { params: { solid: 'dodecahedron' }, transform: { scale: 120 } }), at: { x: 230, y: 290 } },
+      { ...shapeStarter('superquadric', { transform: { scale: 110 } }), at: { x: 600, y: 290 } },
+      { ...shapeStarter('hyperboloid', { transform: { scale: 120 } }), at: { x: 970, y: 290 } },
+      { ...shapeStarter('mobius', { transform: { scale: 125 } }), at: { x: 230, y: 640 } },
+      { ...shapeStarter('seashell', { transform: { scale: 135 } }), at: { x: 600, y: 640 } },
+      { ...shapeStarter('saddle', { transform: { scale: 105 } }), at: { x: 970, y: 640 } },
+    ]),
+  },
+  {
+    id: 'field-notes',
+    name: 'Field notes',
+    blurb: 'Terraced contours beside a branching plant',
+    build: () => doc('graphite', [
+      { ...shapeStarter('contours', { params: { lift: 0.8, levels: 18 }, transform: { scale: 300 } }), at: { x: 430, y: 470 } },
+      { ...shapeStarter('plant', { params: { species: 'twig', jitter: 0.4 }, transform: { scale: 290 } }), at: { x: 930, y: 450 } },
+    ]),
+  },
+  {
+    id: 'strange-orbit',
+    name: 'Strange orbit',
+    blurb: 'A chaotic flow traced as one long line, coloured along its path',
+    build: () => doc('ozone', [{
+      ...shapeStarter('attractor', { params: { system: 'aizawa', steps: 12000 }, transform: { scale: 330, rx: 20, ry: 25 } }),
+      style: { color: 'ramp', colorBy: 't', taper: 'depth', taperAmount: 0.6, width: 0.9, hidden: 'solid', markers: 'none' },
+      spin: 6,
+    }]),
+  },
+  {
     id: 'pulse-bloom',
     name: 'Pulse bloom',
     blurb: 'A flower echoed inward, turning as it shrinks, stirred by noise',

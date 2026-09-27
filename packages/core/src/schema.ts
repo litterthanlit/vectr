@@ -310,7 +310,7 @@ export function describeBlocks() {
       }
     });
   return {
-    sources: SOURCES.map((s) => ({ kind: s.kind, group: s.group ?? 'block', name: s.name, description: s.blurb, params: params(s.params, s.defaults) })),
+    sources: SOURCES.map((s) => ({ kind: s.kind, group: s.group ?? 'block', ...(s.category ? { category: s.category } : {}), name: s.name, description: s.blurb, params: params(s.params, s.defaults) })),
     operators: OPERATORS.map((o) => ({ kind: o.kind, name: o.name, description: o.blurb, params: params(o.params, o.defaults) })),
     style: {
       params: params(STYLE_PARAMS, DEFAULT_STYLE as unknown as Params),

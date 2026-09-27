@@ -61,6 +61,21 @@ const code = await encodeDoc(doc); // "v2.…" → https://your-vectr/#d=<code>
 | `shape` | rounded polygons, stars, squircles, flowers and blobs with echoes |
 | `spirograph` | hypo- and epitrochoid rosettes |
 | `frame` | a plate border with crosshair, ruler ticks and captions |
+| `polyhedron` | tetrahedron, cube, octahedron, dodecahedron, icosahedron, cuboctahedron, geodesic sphere; nested copies |
+| `superquadric` | superellipsoids from pillow to cube to star |
+| `hyperboloid` | "Tower": a hyperboloid woven from straight lines, with rims |
+| `saddle` | hyperbolic paraboloid drawn with its straight rulings |
+| `mobius` | a band with any number of half-twists |
+| `klein` | figure-eight Klein bottle |
+| `seashell` | a tube grown along a logarithmic spiral |
+| `helix` | strands round a shared axis with rungs |
+| `harmonograph` | damped pendulums, optionally swinging in depth |
+| `attractor` | Lorenz, Aizawa, Thomas, Halvorsen flows (lines); Clifford, de Jong maps (points) |
+| `flowfield` | evenly spaced streamlines of a smooth noise field |
+| `contours` | isolines of a noise landscape, liftable into terraces |
+| `plant` | L-system growth (fern, bush, weed, twig), optionally rolled into 3D |
+| `spacefill` | Hilbert, Peano, Gosper, dragon and snowflake curves |
+| `superformula` | Gielis supershapes as echoed outlines or as a solid |
 
 Shapes are drawn in plain ink by default in the app; `shapeStarter(kind)` gives that
 form spec (camera plus style) for scripts.
@@ -70,6 +85,7 @@ form spec (camera plus style) for scripts.
 | `curve` | circle, arc, line, rect, polygon, star, squircle, flower, blob, spiral/helix, wave, trochoid, lissajous, torus knot, vessel profile |
 | `lattice` | a grid of points and lines, square or hex, with an optional circle or diamond mask |
 | `points` | seeded clouds: disc, ring, box, ball, sphere shell, sunflower |
+| `formula` | your own curve x(t), y(t), z(t) or surface x(u,v), y(u,v), z(u,v), with sliders a, b, c; maths-only syntax, parsed without eval |
 | `note` | an annotation: a dot, a leader line and a label |
 
 | Operators | |
@@ -83,6 +99,11 @@ form spec (camera plus style) for scripts.
 | `connect` | nearest neighbours, within distance, in order, or to the centre; optionally bowed |
 | `tile` | a motif at every point; quarter arcs link into loops |
 | `scatter` | points along the lines |
+| `extrude` | pull flat outlines into prisms with side edges, back outline and taper |
+| `kaleidoscope` | N-fold radial repeat with mirrored wedges |
+| `smooth` | Chaikin corner cutting |
+| `offset` | echo closed outlines inward or outward at an even distance |
+| `hatch` | parallel or cross hatching clipped to closed outlines (even-odd, so holes stay open) |
 | `resample` | even spacing, dashes or dots |
 
 Run `vectr blocks` for every parameter.
