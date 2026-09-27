@@ -1,6 +1,6 @@
-import { apply, rotationMatrix, type Mat3 } from './math';
-import type { Layer, Vec2, Vec3 } from './types';
-import { geometryFor } from './generators';
+import { apply, rotationMatrix, type Mat3 } from './math.js';
+import type { Layer, Vec2, Vec3 } from './types.js';
+import { geometryFor } from './generators/index.js';
 
 export interface ProjectedLabel {
   x: number;

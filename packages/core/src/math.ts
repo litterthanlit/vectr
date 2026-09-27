@@ -1,4 +1,4 @@
-import type { Params, Vec3 } from './types';
+import type { Params, Vec3 } from './types.js';
 
 export const TAU = Math.PI * 2;
 export const DEG = Math.PI / 180;

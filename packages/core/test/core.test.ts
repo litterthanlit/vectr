@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GENERATORS, createLayer, geometryFor } from './generators';
-import { renderLayer } from './render';
-import { docToSVG } from './export';
-import { TEMPLATES } from './templates';
+import { GENERATORS, createLayer, geometryFor } from '../src/generators/index.js';
+import { renderLayer } from '../src/render.js';
+import { docToSVG } from '../src/svg.js';
+import { TEMPLATES } from '../src/templates.js';
 
 describe('generators', () => {
   it.each(GENERATORS.map((g) => g.type))('%s builds finite geometry', (type) => {

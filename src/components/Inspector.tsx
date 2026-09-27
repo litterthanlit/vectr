@@ -1,7 +1,7 @@
 import { Dices, RotateCcw } from 'lucide-react';
-import { generatorFor } from '../lib/generators';
-import { ARTBOARD_SIZES, THEMES } from '../lib/templates';
-import type { BackStyle, Layer } from '../lib/types';
+import { generatorFor } from '@vectr/core';
+import { ARTBOARD_SIZES, THEMES } from '@vectr/core';
+import type { BackStyle, Layer } from '@vectr/core';
 import { selectedLayer, useStore } from '../store';
 import { ColorField, IconButton, Section, Segmented, Select, Slider, TextField, Toggle } from './controls';
 

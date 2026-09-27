@@ -1,5 +1,5 @@
-import { createLayer } from './generators';
-import type { Doc, Layer } from './types';
+import { createLayer } from './generators/index.js';
+import type { Doc, Layer } from './types.js';
 
 export interface Theme {
   id: string;

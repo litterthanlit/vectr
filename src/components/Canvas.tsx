@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { renderLayer, renderLayerCached, type RenderedLayer } from '../lib/render';
+import { renderLayer, renderLayerCached, type RenderedLayer } from '@vectr/core';
 import { useStore } from '../store';
 import { ArtboardContent } from './Artboard';
 

@@ -1,5 +1,5 @@
-import { TAU, bool, circle, gcd, int, lerp, num, rng, smoothstep, str } from '../math';
-import type { GeoLabel, GeoNode, Generator, Polyline, Vec3 } from '../types';
+import { TAU, bool, circle, gcd, int, lerp, num, rng, smoothstep, str } from '../math.js';
+import type { GeoLabel, GeoNode, Generator, Polyline, Vec3 } from '../types.js';
 
 const archShapes: Record<string, (s: number) => number> = {
   round: (s) => Math.sqrt(Math.max(0, 1 - (2 * s - 1) ** 2)),

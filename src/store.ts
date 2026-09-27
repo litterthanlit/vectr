@@ -1,7 +1,5 @@
 import { create } from 'zustand';
-import { createLayer, randomParams, uid } from './lib/generators';
-import { TEMPLATES } from './lib/templates';
-import type { Doc, Layer, LayerStyle, Params } from './lib/types';
+import { TEMPLATES, createLayer, parseDoc, randomParams, uid, type Doc, type Layer, type LayerStyle, type Params } from '@vectr/core';
 
 export type Tool = 'move' | 'orbit';
 
@@ -32,6 +30,8 @@ interface State {
   duplicateLayer(id: string): void;
   moveLayer(id: string, dir: -1 | 1): void;
   loadTemplate(id: string): void;
+  /** Replace the document (undoable). Input is validated; returns warnings. */
+  importDoc(input: unknown): string[];
 }
 
 const STORAGE_KEY = 'vectr:doc:v1';
@@ -39,10 +39,9 @@ const STORAGE_KEY = 'vectr:doc:v1';
 function loadDoc(): Doc {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const d = JSON.parse(raw) as Doc;
-      if (d && Array.isArray(d.layers)) return d;
-    }
+    // Run saved data through the same validator as imports, so stale or
+    // hand-edited storage can never put the app in a broken state.
+    if (raw) return parseDoc(raw).doc;
   } catch {
     /* storage unavailable or corrupt — fall through to the starter template */
   }
@@ -159,6 +158,12 @@ export const useStore = create<State>((set, get) => ({
     if (!t) return;
     get().commit(() => t.build());
     set({ selectedId: null, playing: id === 'globe' });
+  },
+  importDoc(input) {
+    const { doc, warnings } = parseDoc(input);
+    get().commit(() => doc);
+    set({ selectedId: null, playing: doc.layers.some((l) => l.spin !== 0) });
+    return warnings;
   },
 }));
 

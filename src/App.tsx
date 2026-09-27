@@ -1,13 +1,13 @@
 import {
-  Download, Hand, LayoutTemplate, Maximize, Minus, MousePointer2, Orbit, Pause, Play, Plus, Redo2, SlidersHorizontal, Shapes, Undo2, X,
+  Download, FolderOpen, Hand, Link2, LayoutTemplate, Maximize, Minus, MousePointer2, Orbit, Pause, Play, Plus, Redo2, SlidersHorizontal, Shapes, Undo2, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Canvas, type CanvasView } from './components/Canvas';
 import { IconButton } from './components/controls';
 import { Inspector } from './components/Inspector';
 import { Layers, Library } from './components/LeftPanel';
-import { copySVG, downloadPNG, downloadProject, downloadSVG } from './lib/export';
-import { TEMPLATES } from './lib/templates';
+import { TEMPLATES, decodeDoc } from '@vectr/core';
+import { copySVG, copyShareLink, downloadPNG, downloadProject, downloadSVG } from './lib/export';
 import { useStore } from './store';
 
 function Menu({ label, icon, children }: { label: string; icon: ReactNode; children: (close: () => void) => ReactNode }) {
@@ -70,10 +70,82 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
 
-  const notify = (msg: string) => {
+  const toastTimer = useRef<number>();
+  const notify = (msg: string, ms = 1800) => {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 1800);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
   };
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  /** Load a design from any source, then report what the validator corrected. */
+  const openDesign = (input: unknown, source: string) => {
+    try {
+      const warnings = useStore.getState().importDoc(input);
+      setView({ zoom: 1, pan: { x: 0, y: 0 } });
+      if (warnings.length) {
+        console.warn(`[vectr] ${source}: ${warnings.length} issue(s) corrected`, warnings);
+        notify(`Opened ${source} · ${warnings.length} issue${warnings.length > 1 ? 's' : ''} corrected (see console)`, 4000);
+      } else {
+        notify(`Opened ${source}`);
+      }
+    } catch (e) {
+      notify(`Couldn't open ${source}: ${e instanceof Error ? e.message : 'unknown error'}`, 4000);
+    }
+  };
+  const openFile = async (file: File) => {
+    if (file.size > 5_000_000) return notify('That file is too large to be a Vectr design', 4000);
+    openDesign(await file.text(), file.name);
+  };
+
+  // Share links: /#d=v1.… opens the design, then the hash is cleared so a
+  // refresh keeps any edits (autosave) instead of reloading the original.
+  const handledHash = useRef('');
+  useEffect(() => {
+    const load = () => {
+      const h = window.location.hash;
+      if (!h.startsWith('#d=') || h === handledHash.current) return;
+      handledHash.current = h;
+      decodeDoc(h)
+        .then(({ doc }) => openDesign(doc, 'shared design'))
+        .catch((e: Error) => notify(`Couldn't open link: ${e.message}`, 4000))
+        .finally(() => window.history.replaceState(null, '', window.location.pathname + window.location.search));
+    };
+    load();
+    window.addEventListener('hashchange', load);
+    return () => window.removeEventListener('hashchange', load);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Drop a .json design anywhere on the window.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragging(true);
+    };
+    const leave = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDragging(false);
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragging(false);
+      const file = e.dataTransfer?.files[0];
+      if (file) void openFile(file);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Open the inspector drawer on small screens when a shape gets selected.
   useEffect(() => {
@@ -98,6 +170,9 @@ export default function App() {
       } else if (mod && k === 'd' && id) {
         e.preventDefault();
         s.duplicateLayer(id);
+      } else if (mod && k === 'o') {
+        e.preventDefault();
+        fileInput.current?.click();
       } else if (mod && k === 's') {
         e.preventDefault();
         downloadSVG(s.doc);
@@ -142,6 +217,19 @@ export default function App() {
 
   return (
     <div className="flex h-dvh flex-col bg-[#0b0b0c] text-zinc-200 antialiased">
+      <input
+        ref={fileInput}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void openFile(f);
+          e.target.value = '';
+        }}
+      />
       {/* Top bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] px-2 sm:px-3">
         <div className="flex items-center gap-2">
@@ -171,11 +259,21 @@ export default function App() {
               ))
             }
           </Menu>
-          <Menu label="Export" icon={<Download size={15} />}>
+          <Menu label="File" icon={<Download size={15} />}>
             {(close) => {
               const doc = () => useStore.getState().doc;
               return (
                 <>
+                  <MenuItem hint="⌘O" onClick={() => { fileInput.current?.click(); close(); }}>
+                    <span className="inline-flex items-center gap-2"><FolderOpen size={14} className="text-zinc-500" />Open project…</span>
+                  </MenuItem>
+                  <MenuItem onClick={() => {
+                    copyShareLink(doc()).then(() => notify('Share link copied'), () => notify('Clipboard unavailable'));
+                    close();
+                  }}>
+                    <span className="inline-flex items-center gap-2"><Link2 size={14} className="text-zinc-500" />Copy share link</span>
+                  </MenuItem>
+                  <div className="my-1 h-px bg-white/[0.06]" />
                   <MenuItem hint="⌘S" onClick={() => { downloadSVG(doc()); close(); }}>Download SVG</MenuItem>
                   <MenuItem hint="2×" onClick={() => { downloadPNG(doc()).catch(() => notify('PNG export failed')); close(); }}>Download PNG</MenuItem>
                   <MenuItem onClick={() => {
@@ -261,6 +359,12 @@ export default function App() {
           </div>
           <Inspector />
         </aside>
+
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-orange-400/70 bg-black/50 backdrop-blur-sm">
+            <p className="text-[15px] font-medium text-white">Drop a Vectr design (.json) to open it</p>
+          </div>
+        )}
 
         {drawer && (
           <button type="button" aria-label="Close panel" onClick={() => setDrawer(null)} className="absolute inset-0 z-20 bg-black/40 lg:hidden" />

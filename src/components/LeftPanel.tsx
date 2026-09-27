@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Lock, Trash2, Unlock } from 'lucide-react';
 import { memo, useMemo } from 'react';
-import { GENERATORS, createLayer } from '../lib/generators';
-import { renderLayer } from '../lib/render';
+import { GENERATORS, createLayer } from '@vectr/core';
+import { renderLayer } from '@vectr/core';
 import { useStore } from '../store';
 import { LayerGraphic } from './Artboard';
 import { IconButton } from './controls';

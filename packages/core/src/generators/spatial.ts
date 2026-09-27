@@ -1,5 +1,5 @@
-import { TAU, basis, bool, circle, clamp, int, lerp, norm, num, rng, str } from '../math';
-import type { GeoLabel, GeoNode, Generator, Polyline, Vec3 } from '../types';
+import { TAU, basis, bool, circle, clamp, int, lerp, norm, num, rng, str } from '../math.js';
+import type { GeoLabel, GeoNode, Generator, Polyline, Vec3 } from '../types.js';
 
 const onSphere = (pts: Vec3[]): Polyline => ({ pts, normals: pts.map((p) => norm(p)), closed: true });
 

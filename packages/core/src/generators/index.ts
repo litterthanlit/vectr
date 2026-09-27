@@ -1,7 +1,7 @@
-import type { Generator, Geometry, Layer, LayerStyle, Params } from '../types';
-import { rng } from '../math';
-import { arches, frame, grid, shape, spirograph, truchet } from './planar';
-import { knot, orbits, revolve, sphere, torus, vortex } from './spatial';
+import type { Generator, Geometry, Layer, LayerStyle, Params } from '../types.js';
+import { rng } from '../math.js';
+import { arches, frame, grid, shape, spirograph, truchet } from './planar.js';
+import { knot, orbits, revolve, sphere, torus, vortex } from './spatial.js';
 
 export const GENERATORS: Generator[] = [
   sphere, revolve, vortex, torus, knot, orbits,
