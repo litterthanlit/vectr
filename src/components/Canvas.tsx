@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { renderLayer, renderLayerCached, type RenderedLayer } from '../lib/render';
 import { useStore } from '../store';
+import { anchorCount } from '../lib/path';
+import { isPathLayer } from '../lib/vector-layer';
+import type { Vec2 } from '../lib/types';
 import { ArtboardContent } from './Artboard';
+import { PathEditor, PenTool } from './PathEditor';
 
 type Drag =
   | { kind: 'move'; id: string; sx: number; sy: number; lx: number; ly: number }
@@ -19,7 +23,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
   const selectedId = useStore((s) => s.selectedId);
   const tool = useStore((s) => s.tool);
   const playing = useStore((s) => s.playing);
-  const { select, updateLayer } = useStore.getState();
+  const { select, updateLayer, setTool } = useStore.getState();
 
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -87,6 +91,10 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
   const toArt = (e: { clientX: number; clientY: number }) => {
     const r = wrap.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left - ox) / s, y: (e.clientY - r.top - oy) / s };
+  };
+  const toArtVec = (e: { clientX: number; clientY: number }): Vec2 => {
+    const p = toArt(e);
+    return [p.x, p.y];
   };
 
   // Wheel: pinch / ctrl-scroll zooms around the cursor, plain scroll pans.
@@ -176,8 +184,10 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
 
   const selected = doc.layers.find((l) => l.id === selectedId && l.visible);
   const sel = selected ? rendered.get(selected.id) : undefined;
+  const editing = tool === 'edit' && isPathLayer(selected) && !selected.locked ? selected : null;
+  const drawing = tool === 'pen';
   const hs = 8 / s; // handle size in artboard units
-  const cursor = panning ? 'grab' : tool === 'orbit' ? 'grab' : 'default';
+  const cursor = panning ? 'grab' : tool === 'orbit' ? 'grab' : tool === 'pen' ? 'crosshair' : 'default';
 
   return (
     <div
@@ -214,13 +224,14 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
                 fill="transparent"
                 style={{ cursor: panning ? 'grab' : tool === 'orbit' ? 'grab' : 'move' }}
                 onPointerDown={(e) => onLayerDown(e, l.id)}
+                onDoubleClick={() => { if (isPathLayer(l)) { select(l.id); setTool('edit'); } }}
                 aria-label={`Select ${l.name}`}
               />
             );
           })}
 
           {/* Selection chrome */}
-          {selected && sel && (
+          {selected && sel && !editing && !drawing && (
             <g pointerEvents="none">
               <rect
                 x={sel.bbox.x} y={sel.bbox.y} width={sel.bbox.w} height={sel.bbox.h}
@@ -229,12 +240,12 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
               <circle cx={selected.x} cy={selected.y} r={3 / s} fill="#ff6a3d" />
               <g transform={`translate(${sel.bbox.x} ${sel.bbox.y - 8 / s}) scale(${1 / s})`}>
                 <text fontSize={11} fontFamily="Inter, sans-serif" fill="#ff6a3d" fontWeight={500}>
-                  {selected.name} · {Math.round(selected.rx)}° / {Math.round(selected.ry)}°
+                  {selected.name} · {isPathLayer(selected) ? `${anchorCount(selected.path)} points` : `${Math.round(selected.rx)}° / ${Math.round(selected.ry)}°`}
                 </text>
               </g>
             </g>
           )}
-          {selected && sel && !selected.locked &&
+          {selected && sel && !selected.locked && !editing && !drawing &&
             [
               [sel.bbox.x, sel.bbox.y, 'nwse-resize'],
               [sel.bbox.x + sel.bbox.w, sel.bbox.y, 'nesw-resize'],
@@ -250,6 +261,9 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
                 aria-label="Scale handle"
               />
             ))}
+
+          {editing && <PathEditor layer={editing} s={s} toArt={toArtVec} panning={panning} />}
+          {drawing && <PenTool s={s} toArt={toArtVec} panning={panning} />}
         </g>
       </svg>
     </div>

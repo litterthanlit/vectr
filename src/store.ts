@@ -2,8 +2,14 @@ import { create } from 'zustand';
 import { createLayer, randomParams, uid } from './lib/generators';
 import { TEMPLATES } from './lib/templates';
 import type { Doc, Layer, LayerStyle, Params } from './lib/types';
+import type { VectorPath } from './lib/path';
+import { anchorCount } from './lib/path';
+import { PATH_TYPE, convertToPaths, recenter } from './lib/vector-layer';
 
-export type Tool = 'move' | 'orbit';
+/** move/orbit act on layers; edit moves anchors and handles; pen draws new paths. */
+export type Tool = 'move' | 'orbit' | 'edit' | 'pen';
+
+export type AgentStatus = 'off' | 'connecting' | 'live';
 
 interface State {
   doc: Doc;
@@ -12,6 +18,11 @@ interface State {
   playing: boolean;
   past: Doc[];
   future: Doc[];
+  /** Selected anchors of the selected path layer, as "subpath:index" keys. */
+  anchorSel: string[];
+  /** Path layer currently being drawn with the pen tool. */
+  penLayerId: string | null;
+  agent: { status: AgentStatus; activity: string | null; at: number };
 
   /** Apply a doc change. Changes sharing a `key` within a second merge into one undo step. */
   commit(fn: (d: Doc) => Doc, key?: string): void;
@@ -32,6 +43,17 @@ interface State {
   duplicateLayer(id: string): void;
   moveLayer(id: string, dir: -1 | 1): void;
   loadTemplate(id: string): void;
+
+  setAnchorSel(keys: string[]): void;
+  /** Replace a path layer's local geometry. */
+  updatePath(id: string, path: VectorPath, key?: string): void;
+  replaceLayer(layer: Layer, key?: string): void;
+  addLayers(layers: Layer[], select?: boolean): void;
+  convertToPath(id: string): void;
+  finishPen(): void;
+  /** Apply a document pushed by an agent (one undo step, no echo). */
+  applyRemote(doc: Doc, activity?: string, layerIds?: string[]): void;
+  setAgent(patch: Partial<State['agent']>): void;
 }
 
 const STORAGE_KEY = 'vectr:doc:v1';
@@ -64,6 +86,9 @@ export const useStore = create<State>((set, get) => ({
   playing: false,
   past: [],
   future: [],
+  anchorSel: [],
+  penLayerId: null,
+  agent: { status: 'off', activity: null, at: 0 },
 
   commit(fn, key) {
     const { doc, past } = get();
@@ -85,17 +110,21 @@ export const useStore = create<State>((set, get) => ({
       past: past.slice(0, -1),
       future: [doc, ...future],
       selectedId: prev.layers.some((l) => l.id === selectedId) ? selectedId : null,
+      anchorSel: [],
     });
   },
   redo() {
     const { past, doc, future } = get();
     if (!future.length) return;
     lastKey = undefined;
-    set({ doc: future[0], past: [...past, doc], future: future.slice(1) });
+    set({ doc: future[0], past: [...past, doc], future: future.slice(1), anchorSel: [] });
   },
 
-  select: (id) => set({ selectedId: id }),
-  setTool: (tool) => set({ tool }),
+  select: (id) => set((s) => (s.selectedId === id ? {} : { selectedId: id, anchorSel: [] })),
+  setTool: (tool) => {
+    if (get().tool === 'pen' && tool !== 'pen') get().finishPen();
+    set({ tool, anchorSel: tool === 'edit' ? get().anchorSel : [] });
+  },
   togglePlay: () => set((s) => ({ playing: !s.playing })),
 
   addLayer(type) {
@@ -118,11 +147,12 @@ export const useStore = create<State>((set, get) => ({
     get().commit((d) => mapLayer(d, id, (l) => ({ ...l, style: { ...l.style, ...patch } })), key && `${id}:s:${key}`);
   },
   randomize(id) {
-    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, params: randomParams(l.type, l.params) })));
+    get().commit((d) => mapLayer(d, id, (l) => (l.type === PATH_TYPE ? l : { ...l, params: randomParams(l.type, l.params) })));
   },
   resetLayer(id) {
     get().commit((d) =>
       mapLayer(d, id, (l) => {
+        if (l.type === PATH_TYPE) return l;
         const fresh = createLayer(l.type, { x: l.x, y: l.y }, { scale: l.scale });
         return { ...fresh, id: l.id, name: l.name };
       }),
@@ -158,9 +188,72 @@ export const useStore = create<State>((set, get) => ({
     const t = TEMPLATES.find((x) => x.id === id);
     if (!t) return;
     get().commit(() => t.build());
-    set({ selectedId: null, playing: id === 'globe' });
+    set({ selectedId: null, playing: id === 'globe', anchorSel: [], penLayerId: null });
   },
+
+  setAnchorSel: (keys) => set({ anchorSel: keys }),
+  updatePath(id, path, key) {
+    get().commit((d) => mapLayer(d, id, (l) => ({ ...l, path })), key && `${id}:path:${key}`);
+  },
+  replaceLayer(layer, key) {
+    get().commit((d) => mapLayer(d, layer.id, () => layer), key && `${layer.id}:${key}`);
+  },
+  addLayers(layers, select = true) {
+    if (!layers.length) return;
+    get().commit((d) => ({ ...d, layers: [...d.layers, ...layers] }));
+    if (select) set({ selectedId: layers[layers.length - 1].id, anchorSel: [] });
+  },
+  convertToPath(id) {
+    const src = get().doc.layers.find((l) => l.id === id);
+    if (!src || src.type === PATH_TYPE) return;
+    const paths = convertToPaths(src);
+    if (!paths.length) return;
+    get().commit((d) => {
+      const i = d.layers.findIndex((l) => l.id === id);
+      const layers = [...d.layers];
+      // Hidden lines sit underneath the main strokes.
+      layers.splice(i, 1, ...[...paths].reverse());
+      return { ...d, layers };
+    });
+    set({ selectedId: paths[0].id, anchorSel: [] });
+  },
+  finishPen() {
+    const id = get().penLayerId;
+    if (!id) return;
+    set({ penLayerId: null });
+    const l = get().doc.layers.find((x) => x.id === id);
+    if (!l?.path) return;
+    if (anchorCount(l.path) < 2) {
+      get().commit((d) => ({ ...d, layers: d.layers.filter((x) => x.id !== id) }), `${id}:pen`);
+      set({ selectedId: null });
+    } else {
+      get().commit((d) => mapLayer(d, id, recenter), `${id}:pen`);
+    }
+  },
+  applyRemote(doc, activity, layerIds) {
+    remoteApplying = true;
+    try {
+      lastKey = undefined;
+      get().commit(() => doc);
+    } finally {
+      remoteApplying = false;
+    }
+    const s = get();
+    const valid = (id: string | null) => !!id && doc.layers.some((l) => l.id === id);
+    const pick = layerIds?.filter((id) => doc.layers.some((l) => l.id === id)).at(-1);
+    set({
+      selectedId: pick ?? (valid(s.selectedId) ? s.selectedId : null),
+      anchorSel: pick && pick !== s.selectedId ? [] : s.anchorSel,
+      penLayerId: valid(s.penLayerId) ? s.penLayerId : null,
+      ...(activity && { agent: { ...s.agent, activity, at: Date.now() } }),
+    });
+  },
+  setAgent: (patch) => set((s) => ({ agent: { ...s.agent, ...patch } })),
 }));
+
+/** True while a remote (agent) document is being applied, so it is not sent back. */
+let remoteApplying = false;
+export const isApplyingRemote = () => remoteApplying;
 
 // Autosave (debounced). Storage failures are non-fatal.
 let saveTimer: ReturnType<typeof setTimeout> | undefined;

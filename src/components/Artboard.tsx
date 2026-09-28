@@ -17,13 +17,33 @@ function backProps(back: BackStyle, width: number) {
   }
 }
 
-export const LayerGraphic = memo(function LayerGraphic({ layer, r, ink }: { layer: Layer; r: RenderedLayer; ink: string }) {
+export const LayerGraphic = memo(function LayerGraphic({ layer, r, ink, exportId }: { layer: Layer; r: RenderedLayer; ink: string; exportId?: string }) {
   const s = layer.style;
   const color = s.stroke ?? ink;
   const showBack = s.back !== 'hidden';
   const nodeR = s.nodeSize;
+  if (layer.type === 'path') {
+    // Path layers export as one clean <path>: the same anchors designers edit.
+    const stroked = s.width > 0;
+    return (
+      <g opacity={s.opacity} id={exportId} data-layer={exportId ? undefined : layer.id}>
+        <path
+          d={r.front}
+          fill={s.fill ?? 'none'}
+          fillRule={r.fillRule}
+          stroke={stroked ? color : undefined}
+          strokeWidth={stroked ? s.width : undefined}
+          strokeLinecap={stroked ? 'round' : undefined}
+          strokeLinejoin={stroked ? 'round' : undefined}
+        />
+        {s.nodes && nodeR > 0 && (
+          <g fill={color}>{r.nodesFront.map(([x, y], i) => <circle key={i} cx={x.toFixed(2)} cy={y.toFixed(2)} r={nodeR} />)}</g>
+        )}
+      </g>
+    );
+  }
   return (
-    <g opacity={s.opacity} data-layer={layer.id}>
+    <g opacity={s.opacity} id={exportId} data-layer={exportId ? undefined : layer.id}>
       {showBack && r.back && (
         <path d={r.back} fill="none" stroke={color} strokeWidth={s.width} strokeLinejoin="round" {...backProps(s.back, s.width)} />
       )}
@@ -54,8 +74,23 @@ export const LayerGraphic = memo(function LayerGraphic({ layer, r, ink }: { laye
   );
 });
 
+/** Unique, Figma-friendly ids from layer names (Figma turns ids into layer names on paste). */
+export function exportIds(doc: Doc): Map<string, string> {
+  const used = new Map<string, number>();
+  const out = new Map<string, string>();
+  for (const l of doc.layers) {
+    const base = l.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'layer';
+    const safe = /^[a-z]/.test(base) ? base : `layer-${base}`;
+    const n = used.get(safe) ?? 0;
+    used.set(safe, n + 1);
+    out.set(l.id, n ? `${safe}-${n + 1}` : safe);
+  }
+  return out;
+}
+
 /** Pure artboard contents: shared by the live canvas and the SVG export. */
-export function ArtboardContent({ doc, rendered }: { doc: Doc; rendered: Map<string, RenderedLayer> }) {
+export function ArtboardContent({ doc, rendered, forExport }: { doc: Doc; rendered: Map<string, RenderedLayer>; forExport?: boolean }) {
+  const ids = forExport ? exportIds(doc) : null;
   return (
     <>
       {doc.rough > 0 && (
@@ -70,7 +105,7 @@ export function ArtboardContent({ doc, rendered }: { doc: Doc; rendered: Map<str
       <g filter={doc.rough > 0 ? 'url(#vectr-rough)' : undefined}>
         {doc.layers.map((l) => {
           const r = rendered.get(l.id);
-          return l.visible && r ? <LayerGraphic key={l.id} layer={l} r={r} ink={doc.ink} /> : null;
+          return l.visible && r ? <LayerGraphic key={l.id} layer={l} r={r} ink={doc.ink} exportId={ids?.get(l.id)} /> : null;
         })}
       </g>
     </>
