@@ -1,3 +1,5 @@
+import type { VectorPath } from './path';
+
 export type Vec3 = [number, number, number];
 export type Vec2 = [number, number];
 
@@ -56,6 +58,8 @@ export interface LayerStyle {
   labels: boolean;
   labelSize: number;
   opacity: number;
+  /** Fill colour for path layers. null/undefined = no fill. */
+  fill?: string | null;
 }
 
 export interface Transform {
@@ -80,6 +84,11 @@ export interface Layer extends Transform {
   spin: number;
   params: Params;
   style: LayerStyle;
+  /**
+   * Editable Bézier geometry, present on `type: 'path'` layers. Coordinates are
+   * local pixels around (x, y) at scale 100; see lib/vector-layer.ts.
+   */
+  path?: VectorPath;
 }
 
 export interface Doc {

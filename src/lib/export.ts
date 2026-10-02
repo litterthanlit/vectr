@@ -6,7 +6,7 @@ import type { Doc } from './types';
 
 export function docToSVG(doc: Doc): string {
   const rendered = new Map(doc.layers.map((l) => [l.id, renderLayer(l)]));
-  const body = renderToStaticMarkup(createElement(ArtboardContent, { doc, rendered }));
+  const body = renderToStaticMarkup(createElement(ArtboardContent, { doc, rendered, forExport: true }));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${doc.width}" height="${doc.height}" viewBox="0 0 ${doc.width} ${doc.height}">${body}</svg>`;
 }
 

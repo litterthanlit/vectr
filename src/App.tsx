@@ -1,14 +1,26 @@
 import {
-  Download, Hand, LayoutTemplate, Maximize, Minus, MousePointer2, Orbit, Pause, Play, Plus, Redo2, SlidersHorizontal, Shapes, Undo2, X,
+  Download, Hand, LayoutTemplate, Maximize, Minus, MousePointer2, Orbit, Pause, PenTool, Play, Plus, Redo2, SlidersHorizontal, Shapes, Spline, Undo2, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Canvas, type CanvasView } from './components/Canvas';
 import { IconButton } from './components/controls';
 import { Inspector } from './components/Inspector';
 import { Layers, Library } from './components/LeftPanel';
+import { AgentLink } from './components/AgentLink';
 import { copySVG, downloadPNG, downloadProject, downloadSVG } from './lib/export';
+import { clonePath, deleteAnchors, parseRef, type VectorPath } from './lib/path';
 import { TEMPLATES } from './lib/templates';
+import { isPathLayer, layerPathAbs, withPathAbs } from './lib/vector-layer';
 import { useStore } from './store';
+
+/** Apply a change to the selected anchors of the selected path layer (in artboard space). */
+function editAnchors(fn: (p: VectorPath, refs: [number, number][]) => VectorPath, key?: string) {
+  const s = useStore.getState();
+  const layer = s.doc.layers.find((l) => l.id === s.selectedId);
+  if (!isPathLayer(layer) || !s.anchorSel.length) return;
+  const next = fn(clonePath(layerPathAbs(layer)), s.anchorSel.map(parseRef));
+  s.updatePath(layer.id, withPathAbs(layer, next).path!, key);
+}
 
 function Menu({ label, icon, children }: { label: string; icon: ReactNode; children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -59,6 +71,13 @@ function MenuItem({ onClick, children, hint }: { onClick(): void; children: Reac
   );
 }
 
+const TOOL_HINTS: Record<string, string> = {
+  move: 'Space-drag to pan · ⌘-scroll to zoom · double-click a path to edit its points',
+  orbit: 'Drag a shape to orbit it in 3D · Shift snaps to 15°',
+  edit: 'Drag points and handles · Alt breaks a handle · double-click the outline to add a point, a point to toggle smooth',
+  pen: 'Click for corners · drag for curves · Shift snaps to 45° · click the first point to close · Enter to finish',
+};
+
 export default function App() {
   const tool = useStore((s) => s.tool);
   const playing = useStore((s) => s.playing);
@@ -89,12 +108,17 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey;
       const id = s.selectedId;
       const k = e.key.toLowerCase();
+      const layer = s.doc.layers.find((l) => l.id === id);
+      const editingPoints = s.tool === 'edit' && isPathLayer(layer);
       if (mod && k === 'z') {
         e.preventDefault();
         e.shiftKey ? s.redo() : s.undo();
       } else if (mod && k === 'y') {
         e.preventDefault();
         s.redo();
+      } else if (mod && k === 'a' && editingPoints) {
+        e.preventDefault();
+        s.setAnchorSel(layer.path.subpaths.flatMap((sp, si) => sp.anchors.map((_, ai) => `${si}:${ai}`)));
       } else if (mod && k === 'd' && id) {
         e.preventDefault();
         s.duplicateLayer(id);
@@ -105,26 +129,47 @@ export default function App() {
         return;
       } else if ((k === 'backspace' || k === 'delete') && id) {
         e.preventDefault();
-        s.removeLayer(id);
+        if (editingPoints && s.anchorSel.length) {
+          editAnchors((p, refs) => deleteAnchors(p, refs));
+          s.setAnchorSel([]);
+          const after = useStore.getState().doc.layers.find((l) => l.id === id);
+          if (isPathLayer(after) && !after.path.subpaths.length) s.removeLayer(id);
+        } else s.removeLayer(id);
+      } else if (k === 'enter') {
+        if (s.tool === 'pen') s.finishPen();
+        else if (isPathLayer(layer) && s.tool !== 'edit') s.setTool('edit');
       } else if (k === 'escape') {
-        s.select(null);
+        if (s.tool === 'pen') s.penLayerId ? s.finishPen() : s.setTool('move');
+        else if (s.tool === 'edit') s.anchorSel.length ? s.setAnchorSel([]) : s.setTool('move');
+        else s.select(null);
       } else if (k === 'v') {
         s.setTool('move');
       } else if (k === 'o') {
         s.setTool('orbit');
-      } else if (k === 'p') {
+      } else if (k === 'a') {
+        s.setTool('edit');
+      } else if (k === 'p' && e.shiftKey) {
         s.togglePlay();
-      } else if (k === 'r' && id) {
+      } else if (k === 'p') {
+        s.setTool('pen');
+      } else if (k === 'r' && id && !isPathLayer(layer)) {
         s.randomize(id);
       } else if (k === '0') {
         setView({ zoom: 1, pan: { x: 0, y: 0 } });
-      } else if (id && k.startsWith('arrow')) {
+      } else if (layer && k.startsWith('arrow')) {
         e.preventDefault();
-        const l = s.doc.layers.find((x) => x.id === id)!;
         const step = e.shiftKey ? 10 : 1;
         const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0;
         const dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
-        s.updateLayer(id, { x: l.x + dx, y: l.y + dy }, 'nudge');
+        if (editingPoints && s.anchorSel.length) {
+          editAnchors((p, refs) => {
+            for (const [si, ai] of refs) {
+              const a = p.subpaths[si]?.anchors[ai];
+              if (a) { a.x += dx; a.y += dy; }
+            }
+            return p;
+          }, 'nudge-points');
+        } else s.updateLayer(layer.id, { x: layer.x + dx, y: layer.y + dy }, 'nudge');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -162,6 +207,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <AgentLink />
           <Menu label="Templates" icon={<LayoutTemplate size={15} />}>
             {(close) =>
               TEMPLATES.map((t) => (
@@ -216,9 +262,11 @@ export default function App() {
             className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-2xl border border-white/10 bg-zinc-900/70 p-1 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl"
           >
             <IconButton label="Move" shortcut="V" active={tool === 'move'} onClick={() => setTool('move')}><MousePointer2 size={16} /></IconButton>
+            <IconButton label="Edit points" shortcut="A" active={tool === 'edit'} onClick={() => setTool('edit')}><Spline size={16} /></IconButton>
+            <IconButton label="Pen" shortcut="P" active={tool === 'pen'} onClick={() => setTool('pen')}><PenTool size={16} /></IconButton>
             <IconButton label="Orbit in 3D" shortcut="O" active={tool === 'orbit'} onClick={() => setTool('orbit')}><Orbit size={16} /></IconButton>
             <div className="mx-1 h-5 w-px bg-white/10" />
-            <IconButton label={playing ? 'Pause spin' : 'Play spin'} shortcut="P" active={playing} onClick={togglePlay}>
+            <IconButton label={playing ? 'Pause spin' : 'Play spin'} shortcut="⇧P" active={playing} onClick={togglePlay}>
               {playing ? <Pause size={15} /> : <Play size={15} />}
             </IconButton>
             <div className="mx-1 h-5 w-px bg-white/10" />
@@ -239,7 +287,7 @@ export default function App() {
           </div>
 
           <div className="pointer-events-none absolute top-3 left-3 hidden items-center gap-1.5 text-[11px] text-zinc-600 md:flex">
-            <Hand size={12} /> Space-drag to pan · ⌘-scroll to zoom
+            <Hand size={12} /> {TOOL_HINTS[tool]}
           </div>
 
           {toast && (

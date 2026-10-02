@@ -1,6 +1,7 @@
 import { apply, rotationMatrix, type Mat3 } from './math';
 import type { Layer, Vec2, Vec3 } from './types';
 import { geometryFor } from './generators';
+import { pathBounds, pathToD, transformPath, type Affine } from './path';
 
 export interface ProjectedLabel {
   x: number;
@@ -19,6 +20,8 @@ export interface RenderedLayer {
   arrows: string[];
   labels: ProjectedLabel[];
   bbox: { x: number; y: number; w: number; h: number };
+  /** Path layers only: fill rule for `front`. */
+  fillRule?: 'nonzero' | 'evenodd';
 }
 
 const f = (n: number) => (Math.round(n * 100) / 100).toString();
@@ -59,12 +62,38 @@ export function projector(layer: Pick<Layer, 'rx' | 'ry' | 'rz' | 'perspective' 
   };
 }
 
+/** Path layers: local path pixels -> artboard pixels (orthographic, so Béziers stay exact). */
+export function pathAffine(layer: Pick<Layer, 'x' | 'y' | 'scale' | 'rx' | 'ry' | 'rz'>): Affine {
+  const P = projector({ ...layer, perspective: 0 });
+  const map = (x: number, y: number) => P.screen(P.view([x / 100, -y / 100, 0]));
+  const o = map(0, 0), ex = map(1, 0), ey = map(0, 1);
+  return [ex[0] - o[0], ex[1] - o[1], ey[0] - o[0], ey[1] - o[1], o[0], o[1]];
+}
+
+function renderPathLayer(layer: Layer, extraRy: number): RenderedLayer {
+  const abs = transformPath(layer.path!, pathAffine({ ...layer, ry: layer.ry + extraRy }));
+  const b = pathBounds(abs);
+  const nodes: Vec2[] = layer.style.nodes ? abs.subpaths.flatMap((s) => s.anchors.map((a): Vec2 => [a.x, a.y])) : [];
+  return {
+    id: layer.id,
+    front: pathToD(abs),
+    back: '',
+    nodesFront: nodes,
+    nodesBack: [],
+    arrows: [],
+    labels: [],
+    bbox: { x: b.x, y: b.y, w: b.w, h: b.h },
+    fillRule: abs.fillRule,
+  };
+}
+
 /**
  * Project a layer's geometry into SVG path data. Each polyline is split into
  * runs that face the viewer (front) and runs that face away (back), so the back
  * half of a shape can be drawn dotted, dashed, faded or hidden.
  */
 export function renderLayer(layer: Layer, extraRy = 0): RenderedLayer {
+  if (layer.type === 'path' && layer.path) return renderPathLayer(layer, extraRy);
   const geo = geometryFor(layer);
   const P = projector({ ...layer, ry: layer.ry + extraRy });
   let front = '';
