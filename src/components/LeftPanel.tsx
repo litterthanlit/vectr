@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Lock, Trash2, Unlock } from 'lucide-react';
-import { memo, useMemo } from 'react';
-import { RECIPES, SOURCES, createForm, docToSVG, formToSVG, renderForm, type FormSpec } from '@vectr/core';
+import { memo, useMemo, type ReactNode } from 'react';
+import { ELEMENTS, RECIPES, SOURCES, createForm, docToSVG, formToSVG, placeElement, renderForm, type FormSpec } from '@vectr/core';
 import { useStore } from '../store';
 import { IconButton } from './controls';
 
@@ -10,17 +10,57 @@ export const SOURCE_STARTERS: Record<string, FormSpec> = {
   lattice: { source: { kind: 'lattice' }, transform: { rx: -55, ry: 0, perspective: 0.3 } },
   points: { source: { kind: 'points' }, style: { markers: 'dot', markerSize: 3 } },
   note: { source: { kind: 'note', params: { text: 'Note' } }, transform: { rx: 0, ry: 0 }, style: { taper: 'none', labelSize: 14 } },
+  orbits: { source: { kind: 'orbits' } },
+  // Cards are always flat: their text stays upright, so a tilted frame would look broken.
+  card: {
+    source: { kind: 'card' },
+    transform: { rx: 0, ry: 0, perspective: 0 },
+    style: { taper: 'none', color: 'solid', fill: 'shapes', fillOpacity: 0.12, knockout: true, labelFont: 'sans', labelSize: 18, width: 1 },
+  },
 };
+
+/** A source added without a starter of its own still gets a tile, rather than crashing the panel. */
+const starterFor = (kind: string): FormSpec => SOURCE_STARTERS[kind] ?? { source: { kind } };
 
 const THUMB_RAMP = ['#52525b', '#a1a1aa', '#fafafa'];
 
+/** Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit. */
+const THUMB_LAYOUT: Record<string, { scale: number; x: number; y: number; labelSize: number }> = {
+  note: { scale: 34, x: 30, y: 66, labelSize: 11 },
+  card: { scale: 28, x: 50, y: 50, labelSize: 7 },
+};
+const THUMB_DEFAULT = { scale: 36, x: 50, y: 50, labelSize: 11 };
+
 const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
   const html = useMemo(() => {
-    const form = createForm(SOURCE_STARTERS[kind], { x: 50, y: 50 });
-    Object.assign(form, { scale: kind === 'note' ? 34 : 36, x: kind === 'note' ? 30 : 50, y: kind === 'note' ? 66 : 50 });
-    form.style = { ...form.style, width: 1, markerSize: 1.3, labelSize: 11 };
+    const { labelSize, ...place } = THUMB_LAYOUT[kind] ?? THUMB_DEFAULT;
+    const form = createForm(starterFor(kind), { x: 50, y: 50 });
+    Object.assign(form, place);
+    // A solid-colour starter would otherwise take the darkest ramp stop and look dim next to the ramped tiles.
+    const stroke = form.style.color === 'solid' ? form.style.stroke ?? THUMB_RAMP[1] : form.style.stroke;
+    form.style = { ...form.style, width: 1, markerSize: 1.3, labelSize, stroke };
+    // No paper: a thumbnail sits on its tile, so knockout fills are left see-through.
     return formToSVG(form, renderForm(form, THUMB_RAMP));
   }, [kind]);
+  return <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
+/**
+ * An element's forms in a 100×100 thumbnail. Elements are authored for a 1000px artboard, so placing them at 100 shrinks
+ * size and offsets tenfold; line weights and bead sizes would vanish at that scale, so they are re-derived here.
+ */
+const ElementThumb = memo(function ElementThumb({ id }: { id: string }) {
+  const html = useMemo(() => {
+    const element = ELEMENTS.find((e) => e.id === id)!;
+    return placeElement(element, 100, 100)
+      .map((form) => {
+        const st = form.style;
+        // Caption text is tiny at this scale; nudge it up so a card tile still suggests lines of text.
+        form.style = { ...st, width: 0.5 + st.width * 0.28, markerSize: Math.max(0.7, st.markerSize * 0.4), labelSize: st.labelSize * 1.25 };
+        return formToSVG(form, renderForm(form, THUMB_RAMP));
+      })
+      .join('');
+  }, [id]);
   return <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
@@ -35,31 +75,49 @@ const RecipeThumb = memo(function RecipeThumb({ id }: { id: string }) {
 
 const heading = 'mb-2.5 px-1 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500';
 
+/** A square-thumbnail tile that adds something to the document. */
+function Tile({ name, blurb, verb = 'Add', onClick, children }: { name: string; blurb: string; verb?: string; onClick(): void; children: ReactNode }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        title={blurb}
+        aria-label={`${verb} ${name}: ${blurb}`}
+        className="group flex w-full flex-col items-center gap-1 rounded-xl p-1 text-zinc-400 ring-1 ring-transparent transition hover:bg-white/[0.04] hover:text-zinc-100 hover:ring-white/[0.08] focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <span className="aspect-square w-full rounded-lg bg-white/[0.025] p-1 transition-transform duration-300 group-hover:scale-[1.04]">{children}</span>
+        <span className="w-full truncate text-center text-[11px]">{name}</span>
+      </button>
+    </li>
+  );
+}
+
 export function Library({ onAdd }: { onAdd?(): void }) {
   const addForm = useStore((s) => s.addForm);
+  const addElement = useStore((s) => s.addElement);
   const loadRecipe = useStore((s) => s.loadRecipe);
   return (
-    <div className="px-3 pt-4 pb-2">
+    <div className="px-3 pt-4 pb-2 lg:overflow-y-auto">
       <h2 className={heading}>Sources</h2>
-      <ul className="grid grid-cols-4 gap-1.5">
+      <ul className="grid grid-cols-3 gap-1.5">
         {SOURCES.map((s) => (
-          <li key={s.kind}>
-            <button
-              type="button"
-              onClick={() => { addForm(SOURCE_STARTERS[s.kind]); onAdd?.(); }}
-              title={s.blurb}
-              aria-label={`Add ${s.name}: ${s.blurb}`}
-              className="group flex w-full flex-col items-center gap-1 rounded-xl p-1 text-zinc-400 ring-1 ring-transparent transition hover:bg-white/[0.04] hover:text-zinc-100 hover:ring-white/[0.08] focus-visible:outline-2 focus-visible:outline-accent"
-            >
-              <span className="aspect-square w-full rounded-lg bg-white/[0.025] p-1 transition-transform duration-300 group-hover:scale-[1.04]">
-                <SourceThumb kind={s.kind} />
-              </span>
-              <span className="truncate text-[11px]">{s.name}</span>
-            </button>
-          </li>
+          <Tile key={s.kind} name={s.name} blurb={s.blurb} onClick={() => { addForm(starterFor(s.kind)); onAdd?.(); }}>
+            <SourceThumb kind={s.kind} />
+          </Tile>
         ))}
       </ul>
       <p className="mt-2 px-1 text-[11px] leading-snug text-zinc-500">Then stack operators on it in the panel on the right.</p>
+
+      <h2 className={`${heading} mt-5`}>Elements</h2>
+      <ul className="grid grid-cols-3 gap-1.5">
+        {ELEMENTS.map((e) => (
+          <Tile key={e.id} name={e.name} blurb={e.blurb} onClick={() => { addElement(e.id); onAdd?.(); }}>
+            <ElementThumb id={e.id} />
+          </Tile>
+        ))}
+      </ul>
+      <p className="mt-2 px-1 text-[11px] leading-snug text-zinc-500">Ready-made pieces: several forms placed together on the artboard.</p>
 
       <h2 className={`${heading} mt-5`}>Recipes</h2>
       <ul className="grid grid-cols-2 gap-1.5">
@@ -90,7 +148,7 @@ export function Forms() {
   const { select, updateForm, removeForm, duplicateForm, moveForm } = useStore.getState();
   const ordered = [...forms].reverse();
   return (
-    <div className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06]">
+    <div className="flex min-h-0 flex-1 flex-col border-t border-white/[0.06] lg:min-h-[168px]">
       <h2 className="px-4 pt-4 pb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
         Forms <span className="ml-1 font-mono text-zinc-600">{forms.length}</span>
       </h2>

@@ -12,11 +12,14 @@ export { OPERATORS, opFor } from './operators/index.js';
 export { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 export { DEFAULT_TRANSFORM, createForm, createOp, defaultName, uid, type FormSpec } from './forms.js';
 export { MAX_OPS, POINT_BUDGET, buildForm, formKey, type BuildResult } from './pipeline.js';
-export { COLOR_LEVELS, TAPER_LEVELS, projector, renderForm, renderFormCached } from './render.js';
+export {
+  COLOR_LEVELS, LABEL_LEADING, TAPER_LEVELS, cleanText, labelDy0, projector, renderForm, renderFormCached, textWidth, wrapText,
+} from './render.js';
 export type { FillBucket, MarkerBucket, ProjectedLabel, Projector, RenderedForm, StrokeBucket } from './render.js';
-export { LABEL_FONT, ROUGH_FILTER_ID, docToSVG, esc, formToSVG, roughFilterSVG } from './svg.js';
+export { LABEL_FONT, LABEL_FONTS, ROUGH_FILTER_ID, docToSVG, esc, formToSVG, roughFilterSVG } from './svg.js';
 export { ARTBOARD_SIZES, THEMES, themeFor, type Theme } from './themes.js';
 export { RECIPES, type Recipe } from './recipes.js';
+export { ELEMENTS, ELEMENT_ARTBOARD, elementDocForms, elementScale, placeElement, type Element, type ElementForm } from './elements.js';
 export { mutate, variations } from './mutate.js';
 export { accentFrom, isHex, sampleRamp } from './color.js';
 export {

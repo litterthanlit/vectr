@@ -1,6 +1,7 @@
 import { Shuffle, Sparkles, X } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { formToSVG, renderForm, variations, type Form } from '@vectr/core';
+import { isTyping } from '../lib/keys';
 import { selectedForm, useStore } from '../store';
 import { IconButton, Segmented } from './controls';
 
@@ -19,8 +20,9 @@ const Variant = memo(function Variant({ form, ramp, background }: { form: Form; 
     // The thumbnail shrinks the form to ~130px, so thicken strokes to stay legible.
     const k = Math.max(1, (side / THUMB_PX) * 0.9);
     const thick: Form = { ...form, style: { ...form.style, width: form.style.width * k, markerSize: form.style.markerSize * k } };
-    return { html: formToSVG(thick, renderForm(thick, ramp)), box: `${cx - side / 2} ${cy - side / 2} ${side} ${side}` };
-  }, [form, ramp]);
+    // The background is the paper knockout fills are painted with, as on the artboard.
+    return { html: formToSVG(thick, renderForm(thick, ramp), background), box: `${cx - side / 2} ${cy - side / 2} ${side} ${side}` };
+  }, [form, ramp, background]);
   return (
     <svg viewBox={box} className="h-full w-full" style={{ background }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
   );
@@ -43,7 +45,7 @@ export function MutateStrip() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMutateOpen(false);
       const n = Number(e.key);
-      if (n >= 1 && n <= COUNT && !(e.target instanceof HTMLInputElement)) document.getElementById(`variant-${n}`)?.click();
+      if (n >= 1 && n <= COUNT && !isTyping(e)) document.getElementById(`variant-${n}`)?.click();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

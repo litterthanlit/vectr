@@ -2,12 +2,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { RECIPES, decodeDoc, docToSVG, serializeDoc } from '@vectr/core';
+import { ELEMENTS, RECIPES, STYLE_PARAMS, decodeDoc, docToSVG, elementDocForms, serializeDoc } from '@vectr/core';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { DesignError, DesignStore } from '../src/designs.js';
 import { Files } from '../src/files.js';
 import { createServer } from '../src/server.js';
 
@@ -43,12 +44,51 @@ describe('tool surface', () => {
     expect(client.getInstructions()).toMatch(/Workflow/);
   });
 
+  it('teaches the new blocks and tips in the instructions, built from the engine', () => {
+    const text = client.getInstructions()!;
+    for (const kind of ['orbits', 'card', 'ticks', 'resample']) expect(text).toContain(kind);
+    expect(text).toMatch(/ALWAYS keep them flat \(rx 0, ry 0, perspective 0\)/);
+    expect(text).toMatch(/knockout/);
+    expect(text).toMatch(/keepLines/);
+    expect(text).toMatch(/add_elements/);
+    for (const e of ELEMENTS) expect(text).toContain(e.id);
+  });
+
+  it('accepts every engine style option, so none is rejected at the boundary', async () => {
+    const { tools } = await client.listTools();
+    const update = tools.find((t) => t.name === 'vectr_update_design')!;
+    type Schema = { properties?: Record<string, Schema>; items?: Schema; enum?: string[] };
+    const style = (update.inputSchema as Schema).properties!.add_forms.items!.properties!.style;
+    for (const p of STYLE_PARAMS) {
+      if (p.kind !== 'select') continue;
+      expect(style.properties![p.key]?.enum, p.key).toEqual(p.options.map((o) => o.value));
+    }
+    for (const key of ['dash', 'knockout', 'labelFont', 'labelColor']) expect(style.properties![key], key).toBeDefined();
+  });
+
   it('describes building blocks as markdown or json', async () => {
     const md = textOf(await call('vectr_list_building_blocks'));
     expect(md).toMatch(/### revolve — Revolve/);
     expect(md).toMatch(/`turns` \(Turns\): 0.25–16, default 3 _\(only when shape is spiral\)_/);
     const json = JSON.parse(textOf(await call('vectr_list_building_blocks', { block: 'warp', response_format: 'json' })));
     expect(json.operators[0].params.find((p: { key: string }) => p.key === 'kind').options).toContain('noise');
+  });
+
+  it('lists the newer sources, operators, style keys, elements and recipes', async () => {
+    const md = textOf(await call('vectr_list_building_blocks'));
+    expect(md).toMatch(/### orbits — Orbits/);
+    expect(md).toMatch(/### card — Card/);
+    expect(md).toMatch(/### ticks — Ticks/);
+    expect(md).toMatch(/`keepLines` \(Keep lines\)/);
+    for (const key of ['dash', 'knockout', 'labelFont', 'labelColor']) expect(md).toContain(`\`${key}\``);
+    expect(md).toMatch(/`fill` \(Fill\): none \| ribbons \| shapes/);
+    for (const e of ELEMENTS) expect(md).toContain(`\`${e.id}\` ${e.name} (${e.forms.length} form${e.forms.length === 1 ? '' : 's'}): ${e.blurb}`);
+    expect(md).toMatch(/add_elements/);
+    for (const id of ['meridian', 'gyroscope', 'orrery', 'sonar']) expect(md).toContain(id);
+    expect(md).toContain('fog (bg');
+    const card = textOf(await call('vectr_list_building_blocks', { block: 'card' }));
+    expect(card).toMatch(/^### card — Card/);
+    expect(card).not.toMatch(/## Style/);
   });
 });
 
@@ -108,6 +148,41 @@ describe('design lifecycle', () => {
     expect(design(r2).forms).toHaveLength(1);
   });
 
+  it('accepts the instrument-plate style keys without corrections', async () => {
+    await call('vectr_create_design', { design: { forms: [{ source: { kind: 'card' } }] }, preview: false });
+    const style = { fill: 'shapes', knockout: true, dash: 'dotted', labelFont: 'sans', labelColor: '#111111' };
+    const r = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style }], preview: false });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(design(r).forms[0].style).toMatchObject(style);
+
+    // The same keys on a new form, and a null labelColor clears it again.
+    const r2 = await call('vectr_update_design', {
+      design_id: 'd1',
+      add_forms: [{ source: { kind: 'curve' }, style }],
+      update_forms: [{ id: 'F1', style: { labelColor: null } }],
+      preview: false,
+    });
+    expect(textOf(r2)).not.toMatch(/Corrections/);
+    expect(design(r2).forms[1].style).toMatchObject(style);
+    expect(design(r2).forms[0].style).not.toHaveProperty('labelColor');
+
+    // Bad values are still corrected rather than failing the call.
+    const bad = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style: { labelColor: 'teal' } }], preview: false });
+    expect(bad.isError).toBeFalsy();
+    expect(textOf(bad)).toMatch(/Corrections[\s\S]*labelColor/);
+  });
+
+  it('shortens long text in summaries and keeps it whole in json', async () => {
+    const caption = 'An orbital survey of the inner shell, plotted at one-hundredth scale from the long-baseline data.';
+    await call('vectr_create_design', { design: { forms: [{ source: { kind: 'card', params: { text: caption } } }] }, preview: false });
+    const md = textOf(await call('vectr_get_design', { design_id: 'd1' }));
+    expect(md).toMatch(/card\(text="An orbital survey of the inner shell, plotted a…"\)/);
+    expect(md).not.toContain('long-baseline');
+    const json = textOf(await call('vectr_get_design', { design_id: 'd1', response_format: 'json' }));
+    expect(json).toContain(caption);
+  });
+
   it('mutates a form and applies the chosen variation', async () => {
     await call('vectr_create_design', { recipe: 'pulse-bloom', preview: false });
     const before = JSON.stringify(design(await call('vectr_get_design', { design_id: 'd1' })));
@@ -137,6 +212,107 @@ describe('design lifecycle', () => {
     expect(json.forms).toHaveLength(2);
     await call('vectr_delete_design', { design_id: 'd1' });
     expect(textOf(await call('vectr_list_designs'))).toMatch(/No designs yet/);
+  });
+});
+
+describe('add_elements', () => {
+  const dial = ELEMENTS.find((e) => e.id === 'dial')!;
+  // The compact design leaves out defaults, which includes a position at the artboard centre.
+  type F = { id: string; name: string; x?: number; y?: number; scale: number; rx?: number; ry?: number; perspective?: number };
+  const at = (f: F, cx: number, cy: number) => [f.x ?? cx, f.y ?? cy];
+
+  it('places an element on top of a design and returns a preview', async () => {
+    await call('vectr_create_design', { design: { forms: [{ source: { kind: 'lattice' } }] }, preview: false });
+    const r = await call('vectr_update_design', { design_id: 'd1', add_elements: [{ id: 'dial' }] });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).toMatch(/Added elements: dial \(F2–F4\)/);
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(Buffer.from(images(r)[0].data, 'base64').subarray(1, 4).toString()).toBe('PNG');
+    const forms = design(r).forms as unknown as F[];
+    expect(forms).toHaveLength(1 + dial.forms.length);
+    expect(forms.map((f) => f.id)).toEqual(['F1', 'F2', 'F3', 'F4']);
+    expect(forms.slice(1).map((f) => f.name)).toEqual(dial.forms.map((f) => f.name));
+    expect(r.structuredContent).toMatchObject({ placed: [{ element: 'dial', formIds: ['F2', 'F3', 'F4'] }] });
+  });
+
+  it('centres on the artboard and scales with its shorter side, like the app does', async () => {
+    await call('vectr_create_design', { settings: { width: 1200, height: 900 }, preview: false });
+    const r = await call('vectr_update_design', { design_id: 'd1', add_elements: [{ id: 'dial' }], preview: false });
+    const [bezel] = design(r).forms as unknown as F[];
+    expect(at(bezel, 600, 450)).toEqual([600, 450]);
+    expect(bezel.scale).toBe(Math.round(330 * 0.9));
+    // Cards and dials are flat, whatever the artboard.
+    expect(bezel.rx ?? 0).toBe(0);
+    expect(bezel.perspective ?? 0).toBe(0);
+  });
+
+  it('moves and sizes an element with x, y and size', async () => {
+    await call('vectr_create_design', { settings: { width: 1000, height: 1000 }, preview: false });
+    const r = await call('vectr_update_design', {
+      design_id: 'd1',
+      add_elements: [{ id: 'dial', x: 300, y: 400, size: 0.5 }, { id: 'gimbal', x: 700, y: 620 }],
+      preview: false,
+    });
+    const forms = design(r).forms as unknown as F[];
+    const [d, g] = [forms.slice(0, dial.forms.length), forms.slice(dial.forms.length)];
+    expect(d.map((f) => at(f, 500, 500))).toEqual(d.map(() => [300, 400]));
+    expect(d.map((f) => f.scale)).toEqual(elementDocForms(dial, 1000, 1000).map((f) => Math.round((f.scale as number) / 2)));
+    expect(g.map((f) => at(f, 500, 500))).toEqual(g.map(() => [700, 620]));
+    expect(g[0].scale).toBe(360);
+  });
+
+  it('keeps card elements flat, with their text scaled by size', async () => {
+    await call('vectr_create_design', { settings: { width: 1000, height: 1000 }, preview: false });
+    const r = await call('vectr_update_design', { design_id: 'd1', add_elements: [{ id: 'caption', size: 2 }], preview: false });
+    const [card] = design(r).forms as unknown as (F & { style: Record<string, unknown> })[];
+    expect(card).toMatchObject({ scale: 520, style: { fill: 'shapes', knockout: true, labelFont: 'sans', labelSize: 54 } });
+    expect(card.rx ?? 0).toBe(0);
+    expect(card.ry ?? 0).toBe(0);
+    expect(card.perspective ?? 0).toBe(0);
+  });
+
+  it('uses the artboard as set, follows add_forms, and every element renders', async () => {
+    await call('vectr_create_design', { preview: false });
+    const r = await call('vectr_update_design', {
+      design_id: 'd1',
+      set: { width: 800, height: 800, theme: 'fog' },
+      add_forms: [{ source: { kind: 'points' } }],
+      add_elements: ELEMENTS.map((e) => ({ id: e.id })),
+      preview: false,
+    });
+    const total = 1 + ELEMENTS.reduce((n, e) => n + e.forms.length, 0);
+    expect(design(r).forms).toHaveLength(total);
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(at(design(r).forms[1] as unknown as F, 400, 400)).toEqual([400, 400]);
+    const png = await call('vectr_render_preview', { design_id: 'd1', width: 300 });
+    expect(images(png)).toHaveLength(1);
+    await call('vectr_export_design', { design_id: 'd1', format: 'svg', file_path: 'all.svg' });
+    expect(readFileSync(join(root, 'all.svg'), 'utf8')).toMatch(/^<svg/);
+  });
+
+  it('rejects an unknown element id and bad sizes, changing nothing', async () => {
+    await call('vectr_create_design', { design: { forms: [{ source: { kind: 'curve' } }] }, preview: false });
+    const attempts: [Record<string, unknown>, RegExp][] = [
+      [{ id: 'teapot' }, /one of "globe"\|"dial"[\s\S]*add_elements\[0\]\.id/],
+      [{ id: 'dial', size: 0 }, /add_elements\[0\]\.size/],
+      [{ id: 'dial', size: -1 }, /add_elements\[0\]\.size/],
+      [{ id: 'dial', scale: 2 }, /add_elements\[0\]/],
+    ];
+    for (const [bad, why] of attempts) {
+      const r = await call('vectr_update_design', { design_id: 'd1', add_elements: [bad], preview: false });
+      expect(r.isError, JSON.stringify(bad)).toBe(true);
+      expect(textOf(r)).toMatch(why);
+    }
+    expect(design(await call('vectr_get_design', { design_id: 'd1', response_format: 'json' })).forms).toHaveLength(1);
+  });
+
+  it('names the known elements when the store is called with an unknown id', () => {
+    const store = new DesignStore();
+    const { design: d } = store.create({ forms: [] });
+    expect(() => store.update(d.id, { add_forms: [{ source: { kind: 'curve' } }], add_elements: [{ id: 'teapot' }] })).toThrow(DesignError);
+    expect(() => store.update(d.id, { add_elements: [{ id: 'teapot' }] })).toThrow(/Unknown element "teapot". Known: globe, dial/);
+    // The failed call spent no form ids and changed nothing.
+    expect(store.update(d.id, { add_forms: [{ source: { kind: 'curve' } }] }).design.doc.forms.map((f) => f.id)).toEqual(['F1']);
   });
 });
 
@@ -214,6 +390,11 @@ describe('stdio binary', () => {
     await c.connect(transport);
     const r = (await c.callTool({ name: 'vectr_create_design', arguments: { recipe: 'loom-knot', preview_width: 200 } })) as CallToolResult;
     expect(r.content.some((x) => x.type === 'image')).toBe(true);
+    // The built server places elements and reports the package's own version.
+    const e = (await c.callTool({ name: 'vectr_update_design', arguments: { design_id: 'd1', add_elements: [{ id: 'gauge', size: 0.5 }], preview_width: 200 } })) as CallToolResult;
+    expect(e.isError).toBeFalsy();
+    expect(textOf(e)).toMatch(/Added elements: gauge/);
+    expect(c.getServerVersion()?.version).toBe(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version);
     await c.close();
   }, 60_000);
 });

@@ -1,5 +1,5 @@
 import { arcLengths, deform, noise3, resampleLine, sampleLine } from '../geo.js';
-import { clamp, int, lerp, num, rng, smoothstep, str } from '../math.js';
+import { bool, clamp, int, lerp, num, rng, smoothstep, str } from '../math.js';
 import type { GeoNode, OpDef, Polyline, Vec3 } from '../types.js';
 
 type Local = (l: number, u: number, w: number, amt: number, freq: number) => [number, number, number];
@@ -114,8 +114,9 @@ export const resample: OpDef = {
     { key: 'points', label: 'Points per line', kind: 'range', min: 3, max: 400, step: 1, when: { key: 'mode', in: ['even'] } },
     { key: 'spacing', label: 'Spacing', kind: 'range', min: 0.01, max: 0.5, step: 0.005, when: { key: 'mode', in: ['dashes', 'dots'] } },
     { key: 'duty', label: 'Dash length', kind: 'range', min: 0.05, max: 0.95, step: 0.01, when: { key: 'mode', in: ['dashes'] } },
+    { key: 'keepLines', label: 'Keep lines', kind: 'toggle', when: { key: 'mode', in: ['dots'] }, help: 'Draw the dots on top of the original lines' },
   ],
-  defaults: { mode: 'dashes', points: 24, spacing: 0.08, duty: 0.55 },
+  defaults: { mode: 'dashes', points: 24, spacing: 0.08, duty: 0.55, keepLines: false },
   apply(g, p) {
     const mode = str(p, 'mode');
     if (mode === 'even') return { ...g, lines: g.lines.map((l) => resampleLine(l, int(p, 'points'))) };
@@ -141,6 +142,6 @@ export const resample: OpDef = {
         });
       }
     }
-    return { lines, nodes, labels: g.labels };
+    return { lines: mode === 'dots' && bool(p, 'keepLines') ? g.lines : lines, nodes, labels: g.labels };
   },
 };

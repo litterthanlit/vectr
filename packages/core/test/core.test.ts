@@ -6,12 +6,15 @@ import { SOURCES } from '../src/sources/index.js';
 import { COLOR_LEVELS, TAPER_LEVELS, renderForm } from '../src/render.js';
 import { docToSVG } from '../src/svg.js';
 import { RECIPES } from '../src/recipes.js';
+import { ELEMENTS, elementDocForms, placeElement } from '../src/elements.js';
+import { describeBlocks, parseDoc } from '../src/schema.js';
 import { THEMES } from '../src/themes.js';
 import { mutate, variations } from '../src/mutate.js';
 import { sampleRamp } from '../src/color.js';
 import type { Form, Geometry } from '../src/types.js';
 
 const RAMP = ['#222222', '#ffffff'];
+const DEFAULT_CARD_VIEW = { rx: -20, ry: 25, perspective: 0 };
 const at = { x: 500, y: 500 };
 /** Build a stack with defaults filled in, the way the app and parser do. */
 const stack = (source: { kind: string; params?: Record<string, unknown> }, ops: { kind: string; params?: Record<string, unknown> }[] = []) =>
@@ -136,11 +139,114 @@ describe('mutate', () => {
   });
 });
 
+describe('elements', () => {
+  const ids = ELEMENTS.map((e) => e.id);
+  const DOC = { version: 2 as const, width: 1000, height: 1000, background: '#f6f6f7', ramp: ['#cfcfd4', '#9a9aa3', '#2c2c32'], rough: 0 };
+
+  it('ships the instrument set, each with a name, a blurb and forms', () => {
+    expect(ids).toEqual(expect.arrayContaining(['globe', 'dial', 'orbit-shell', 'ruler', 'caption', 'gimbal']));
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const e of ELEMENTS) {
+      expect(e.name.length).toBeGreaterThan(0);
+      expect(e.blurb.length).toBeGreaterThan(10);
+      expect(e.forms.length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(ids)('%s parses without warnings and renders finite SVG', (id) => {
+    const element = ELEMENTS.find((e) => e.id === id)!;
+    const { doc, warnings } = parseDoc({ forms: elementDocForms(element) });
+    expect(warnings).toEqual([]);
+    expect(doc.forms).toHaveLength(element.forms.length);
+    const svg = docToSVG({ ...doc, ...DOC, forms: doc.forms });
+    expect(svg).not.toMatch(/NaN|Infinity/);
+    expect(svg.length).toBeLessThan(400_000);
+    for (const f of doc.forms) expect(buildForm(f).warnings).toEqual([]);
+  });
+
+  it('names no colours, so every element follows the document theme', () => {
+    for (const e of ELEMENTS) for (const f of e.forms) {
+      expect(f.style?.stroke ?? null).toBeNull();
+      expect(f.style?.ramp ?? null).toBeNull();
+      expect(f.style?.labelColor ?? null).toBeNull();
+    }
+  });
+
+  it('places forms on the artboard centre, scaling size, offsets and label size with the document', () => {
+    for (const [w, h, k] of [[1000, 1000, 1], [1200, 900, 0.9], [1600, 900, 0.9], [500, 800, 0.5]] as const) {
+      for (const element of ELEMENTS) {
+        const placed = placeElement(element, w, h);
+        expect(placed).toHaveLength(element.forms.length);
+        placed.forEach((form, i) => {
+          const spec = element.forms[i];
+          expect(form.x).toBeCloseTo(w / 2 + (spec.offset?.x ?? 0) * k, 6);
+          expect(form.y).toBeCloseTo(h / 2 + (spec.offset?.y ?? 0) * k, 6);
+          expect(form.scale).toBeCloseTo((spec.transform?.scale ?? 240) * k, 6);
+          if (spec.style?.labelSize !== undefined) expect(form.style.labelSize).toBeCloseTo(spec.style.labelSize * k, 6);
+          else expect(form.style.labelSize).toBe(12);
+          expect(form.name).toBe(spec.name ?? form.name);
+        });
+        expect(new Set(placed.map((f) => f.id)).size).toBe(placed.length);
+      }
+    }
+  });
+
+  it('does not mutate the element when placing it', () => {
+    const before = JSON.stringify(ELEMENTS);
+    placeElement(ELEMENTS[0], 1600, 900);
+    elementDocForms(ELEMENTS[0], 1600, 900);
+    expect(JSON.stringify(ELEMENTS)).toBe(before);
+  });
+
+  it('is described to agents with forms they can paste into a design', () => {
+    const described = describeBlocks().elements;
+    expect(described.map((e) => e.id)).toEqual(ids);
+    for (const e of described) {
+      expect(e.description).toBeTruthy();
+      const { doc, warnings } = parseDoc({ width: 1000, height: 1000, forms: e.forms });
+      expect(warnings).toEqual([]);
+      expect(doc.forms.length).toBe(e.forms.length);
+    }
+    expect(describeBlocks().elementsNote).toMatch(/1000/);
+  });
+
+  it('keeps every card flat, in elements and in recipes', () => {
+    const cards = [
+      ...ELEMENTS.flatMap((e) => e.forms.filter((f) => f.source.kind === 'card').map((f) => ({ ...DEFAULT_CARD_VIEW, ...f.transform }))),
+      ...RECIPES.flatMap((r) => r.build().forms.filter((f) => f.source.kind === 'card')),
+    ];
+    expect(cards.length).toBeGreaterThanOrEqual(1);
+    for (const c of cards) expect(c).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+  });
+});
+
+describe('themes', () => {
+  it('has fog: a neutral near-white paper with a cool grey ramp from light to dark', () => {
+    const fog = THEMES.find((t) => t.id === 'fog')!;
+    expect(fog).toBeTruthy();
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(fog.background.slice(i, i + 2), 16));
+    expect(Math.min(r, g, b)).toBeGreaterThan(240);
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(6);
+    expect(fog.background.toLowerCase()).not.toBe('#f3f2e9');
+    const lum = (c: string) => [1, 3, 5].reduce((a, i) => a + parseInt(c.slice(i, i + 2), 16), 0);
+    expect(fog.ramp.map(lum)).toEqual([...fog.ramp.map(lum)].sort((a, b) => b - a));
+  });
+});
+
 describe('originality', () => {
   // Strings and colours from the reference images v1 was modelled on. v2 must not ship them.
-  const DENY = ['#F3F2E9', 'SQNESM', 'LATENT DIM', 'ANGULAR DIST', 'FIG. 062', 'Specimen', 'Chalk', 'Figure plate'];
-  it('recipes and themes contain none of the reference material', () => {
-    const blob = JSON.stringify([RECIPES.map((r) => [r.id, r.name, r.blurb, r.build()]), THEMES]).toLowerCase();
+  const DENY = [
+    '#F3F2E9', 'SQNESM', 'LATENT DIM', 'ANGULAR DIST', 'FIG. 062', 'Specimen', 'Chalk', 'Figure plate',
+    // The tagline of the image that inspired the instrument-plate elements and recipes.
+    'arrives before its interface', 'before its interface', 'close the gap', 'we close',
+  ];
+  it('recipes, elements, source defaults and themes contain none of the reference material', () => {
+    const blob = JSON.stringify([
+      RECIPES.map((r) => [r.id, r.name, r.blurb, r.build()]),
+      ELEMENTS,
+      SOURCES.map((s) => [s.kind, s.name, s.blurb, s.defaults, s.params]),
+      THEMES,
+    ]).toLowerCase();
     for (const s of DENY) expect(blob).not.toContain(s.toLowerCase());
   });
 });

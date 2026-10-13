@@ -1,7 +1,7 @@
 import { sampleRamp } from './color.js';
 import { lerp, rotationMatrix, apply, type Mat3 } from './math.js';
 import { buildForm } from './pipeline.js';
-import type { Form, Vec2, Vec3 } from './types.js';
+import type { Form, LabelFont, Vec2, Vec3 } from './types.js';
 
 export interface StrokeBucket {
   d: string;
@@ -10,6 +10,8 @@ export interface StrokeBucket {
   opacity: number;
   /** Drawn in the form's hidden-line style (dots/dashes). */
   hidden: boolean;
+  /** The one bucket of ink lines: label colour, untapered, always solid and on top. */
+  ink?: boolean;
 }
 export interface FillBucket {
   d: string;
@@ -24,10 +26,17 @@ export interface MarkerBucket {
   width: number;
 }
 export interface ProjectedLabel {
+  /** Screen position of the anchor point. */
   x: number;
   y: number;
-  text: string;
+  /** Already word-wrapped, so the app, SVG export and PNG previews break identically. */
+  lines: string[];
   anchor: 'start' | 'middle' | 'end';
+  /** Where the block sits relative to y: 'bottom' puts the last baseline at y. */
+  valign: 'top' | 'middle' | 'bottom';
+  /** Font size in pixels. */
+  size: number;
+  font: LabelFont;
 }
 
 export interface RenderedForm {
@@ -37,6 +46,8 @@ export interface RenderedForm {
   markers: MarkerBucket[];
   arrows: { d: string; color: string }[];
   labels: ProjectedLabel[];
+  /** Text colour: the form's labelColor, else the colour of its nearest lines. */
+  labelColor: string;
   bbox: { x: number; y: number; w: number; h: number };
   warnings: string[];
 }
@@ -47,6 +58,92 @@ export const TAPER_LEVELS = 6;
 const HIDDEN_FADE = 0.22;
 const MAX_QUADS = 24_000;
 const MAX_FALLBACK_MARKERS = 400;
+
+/** Line height of multi-line labels, in ems. */
+export const LABEL_LEADING = 1.25;
+const MAX_LABEL_LINES = 12;
+const MAX_LABEL_CHARS = 2000;
+
+/** CRLF and CR become LF; control characters (other than LF and tab) are dropped. */
+export const cleanText = (s: string) => s.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+/**
+ * Estimated advance of one character in ems. Measured against Arial/Helvetica-class
+ * faces, then rounded up a little (Inter and DejaVu run wider) so wrapped text rarely
+ * overflows its box.
+ */
+function charEm(ch: string, font: LabelFont): number {
+  if (font !== 'sans' && font !== 'serif') return 0.62; // monospace, letter-spacing included
+  if (ch === ' ' || ch === '\t' || 'ijltfr.,\'!|:;'.includes(ch)) return 0.3;
+  if ('mw'.includes(ch)) return 0.86;
+  if ('MW'.includes(ch)) return 0.95;
+  if (ch >= '0' && ch <= '9') return 0.58;
+  if (ch >= 'A' && ch <= 'Z') return 0.7;
+  if (ch >= 'a' && ch <= 'z') return 0.56;
+  return (ch.codePointAt(0) ?? 0) >= 0x2e80 ? 1 : 0.6;
+}
+
+/** Estimated width of one line of text, in pixels. */
+export function textWidth(text: string, size: number, font: LabelFont = 'mono'): number {
+  let w = 0;
+  for (const ch of text) w += charEm(ch, font);
+  return w * size;
+}
+
+/**
+ * Break text into label lines: explicit newlines are kept, words are packed greedily
+ * into `maxPx`, words wider than a line are cut, and at most 12 lines survive (the last
+ * ends in an ellipsis). Without a usable `maxPx` only explicit newlines break.
+ */
+export function wrapText(text: string, maxPx: number, size: number, font: LabelFont = 'mono'): string[] {
+  const max = maxPx > 0 && Number.isFinite(maxPx) ? maxPx : Infinity;
+  const w = (s: string) => textWidth(s, size, font);
+  const lines: string[] = [];
+  const full = () => lines.length > MAX_LABEL_LINES;
+  const push = (l: string) => void (full() || lines.push(l));
+  for (const para of cleanText(text).slice(0, MAX_LABEL_CHARS).split('\n')) {
+    let cur = '';
+    for (let word of para.split(/\s+/)) {
+      if (!word) continue;
+      if (cur && w(`${cur} ${word}`) <= max) {
+        cur += ` ${word}`;
+        continue;
+      }
+      if (cur) push(cur);
+      // A word wider than the line is cut into line-sized pieces.
+      while (w(word) > max && !full()) {
+        const chars = [...word];
+        let k = 1;
+        while (k < chars.length && w(chars.slice(0, k + 1).join('')) <= max) k++;
+        push(chars.slice(0, k).join(''));
+        word = chars.slice(k).join('');
+      }
+      cur = word;
+    }
+    push(cur);
+    if (full()) break;
+  }
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  if (lines.length > MAX_LABEL_LINES) {
+    lines.length = MAX_LABEL_LINES;
+    let last = lines[MAX_LABEL_LINES - 1];
+    while (last.length > 1 && w(`${last}…`) > max) last = last.slice(0, -1);
+    lines[MAX_LABEL_LINES - 1] = `${last}…`;
+  }
+  return lines;
+}
+
+/** Offset of a label's first baseline from its anchor point, in pixels. */
+export const labelDy0 = (valign: ProjectedLabel['valign'], lines: number, size: number) => {
+  const lh = LABEL_LEADING * size;
+  return valign === 'top' ? 0.8 * size : valign === 'middle' ? -((lines - 1) * lh) / 2 + 0.35 * size : -(lines - 1) * lh;
+};
+
+const FONTS: LabelFont[] = ['mono', 'sans', 'serif'];
+const ANCHORS: ProjectedLabel['anchor'][] = ['start', 'middle', 'end'];
+const VALIGNS: ProjectedLabel['valign'][] = ['top', 'middle', 'bottom'];
+/** Narrow untrusted input (labels arrive from agents and files) to one of a few known values. */
+const pick = <T extends string>(v: unknown, ok: readonly T[], d: T): T => (ok.includes(v as T) ? (v as T) : d);
 
 const f = (n: number) => (Math.round(n * 100) / 100).toString();
 
@@ -142,10 +239,19 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
 
   // Pass 2: strokes.
   const strokeBuckets = new Map<string, { d: string[]; hidden: boolean; wq: number; cq: number }>();
+  const inkPath: string[] = [];
   const arrows: { d: string; color: string }[] = [];
   for (const { line, s, z, back } of lines) {
     const n = s.length;
     if (n < 2) continue;
+    if (line.ink) {
+      // Ink is a single flat bucket (colour is settled once the other strokes are known), so it skips depth styling.
+      for (let k = 0, count = line.closed ? n : n - 1; k < count; k++) {
+        const a = s[k], b = s[(k + 1) % n];
+        inkPath.push(`M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}`);
+      }
+      continue;
+    }
     const count = line.closed ? n : n - 1;
     const tv = (i: number) => (line.t ? line.t[i % n] : i / Math.max(1, n - 1));
     const fam = line.family ?? 0;
@@ -195,8 +301,37 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
     // Far and hidden first, so near lines paint over them.
     .sort((a, b) => Number(b.hidden) - Number(a.hidden) || a.width - b.width);
 
-  // Ribbons: translucent bands between neighbouring lines of the same band.
+  // Fills: translucent ribbons between neighbouring lines of a band, or every closed line as a shape.
   const fillBuckets = new Map<string, string[]>();
+  if (st.fill === 'shapes') {
+    let pts = 0;
+    for (const { line, s, z, back } of lines) {
+      const n = s.length;
+      if (!line.closed || n < 3) continue;
+      if (pts >= MAX_QUADS * 4) {
+        warnings.push('shape fill was capped to keep the drawing light');
+        break;
+      }
+      const isBack = hiddenMode !== 'solid' && back.filter(Boolean).length * 2 > n;
+      if (isBack && hiddenMode === 'hide') continue;
+      // Wind every polygon the same way, or overlapping shapes in one path cancel under nonzero fill.
+      let area = 0;
+      for (let i = 0; i < n; i++) area += s[i][0] * s[(i + 1) % n][1] - s[(i + 1) % n][0] * s[i][1];
+      if (!(Math.abs(area) > 0.1)) continue;
+      const ring = area < 0 ? [...s].reverse() : s;
+      let d = 0, t = 0;
+      for (let i = 0; i < n; i++) {
+        d += depth(z[i]);
+        t += line.t?.[i] ?? 0.5;
+      }
+      const cq = colorLevels === 1 ? 0 : quant(colorValue(d / n, t / n, line.family ?? 0), colorLevels);
+      const key = `${isBack ? 1 : 0}|${cq}`;
+      let list = fillBuckets.get(key);
+      if (!list) fillBuckets.set(key, (list = []));
+      list.push(`M${ring.map(([x, y]) => `${f(x)} ${f(y)}`).join('L')}Z`);
+      pts += n;
+    }
+  }
   if (st.fill === 'ribbons') {
     let quads = 0;
     for (let li = 1; li < lines.length && quads < MAX_QUADS; li++) {
@@ -277,14 +412,35 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
     };
   });
 
-  const labels: ProjectedLabel[] = (geo.labels ?? []).map((l) => {
+  // Labels are wrapped here, not at draw time, so every output breaks lines the same way.
+  const labels: ProjectedLabel[] = [];
+  for (const l of geo.labels ?? []) {
     const [x, y] = P.screen(P.view(l.p));
-    grow([x, y]);
-    return { x, y, text: l.text, anchor: l.anchor ?? 'start' };
-  });
+    const mult = typeof l.size === 'number' && l.size > 0 ? Math.min(l.size, 20) : 1;
+    const size = Math.min(500, Math.max(1, st.labelSize * mult));
+    const font = pick(l.font, FONTS, pick(st.labelFont, FONTS, 'mono'));
+    const lines = wrapText(String(l.text ?? ''), (l.wrap ?? 0) * form.scale, size, font);
+    if (!lines.length) continue;
+    const anchor = pick(l.anchor, ANCHORS, 'start');
+    const valign = pick(l.valign, VALIGNS, 'bottom');
+    labels.push({ x, y, lines, anchor, valign, size, font });
+    if (!st.labels) continue;
+    // Grow the box over the estimated text block, so selecting a card selects its words.
+    const width = Math.max(...lines.map((s) => textWidth(s, size, font)));
+    const left = anchor === 'start' ? x : anchor === 'middle' ? x - width / 2 : x - width;
+    const first = y + labelDy0(valign, lines.length, size);
+    grow([left, first - 0.8 * size]);
+    grow([left + width, first + (lines.length - 1) * LABEL_LEADING * size + 0.25 * size]);
+  }
 
   if (!Number.isFinite(minX)) minX = maxX = form.x, minY = maxY = form.y;
-  return { id: form.id, strokes, fills, markers, arrows, labels, bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, warnings };
+  // Ink takes the label colour, so work that out from the ordinary strokes before adding the ink bucket.
+  const labelColor = st.labelColor ?? strokes[strokes.length - 1]?.color ?? (st.color === 'solid' ? solid : stops[stops.length - 1] ?? solid);
+  if (inkPath.length) strokes.push({ d: inkPath.join(''), width: st.width, color: labelColor, opacity: 1, hidden: false, ink: true });
+  return {
+    id: form.id, strokes, fills, markers, arrows, labels, labelColor,
+    bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, warnings,
+  };
 }
 
 const renderCache = new WeakMap<Form, { ramp: string; r: RenderedForm }>();

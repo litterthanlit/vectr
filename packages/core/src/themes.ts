@@ -12,6 +12,8 @@ export const THEMES: Theme[] = [
   { id: 'kiln', name: 'Kiln', background: '#ede6dd', ramp: ['#e0b6a2', '#b4532f', '#3f1d12'] },
   { id: 'ozone', name: 'Ozone', background: '#0b1220', ramp: ['#16384a', '#2fb3c8', '#d4f86a'] },
   { id: 'bloom', name: 'Bloom', background: '#fff8f3', ramp: ['#ffc9b3', '#ff5c6c', '#a3106e'] },
+  // Neutral paper-white with cool zinc greys: the instrument-plate look, where depth is only ever grey.
+  { id: 'fog', name: 'Fog', background: '#f6f6f7', ramp: ['#cfcfd4', '#9a9aa3', '#2c2c32'] },
 ];
 
 export const themeFor = (id: string) => THEMES.find((t) => t.id === id);

@@ -1,6 +1,6 @@
 import { Dices } from 'lucide-react';
 import type { ParamDef, ParamValue, Params } from '@vectr/core';
-import { IconButton, Select, Slider, TextField, Toggle } from './controls';
+import { IconButton, Select, Slider, TextArea, TextField, Toggle } from './controls';
 
 /** Is this param relevant given the current values (e.g. "Turns" only for spirals)? */
 export const isActive = (def: ParamDef, values: Params) => !def.when || def.when.in.includes(String(values[def.when.key]));
@@ -34,8 +34,10 @@ export function ParamFields({
             return <Toggle key={d.key} label={d.label} checked={Boolean(v)} onChange={(x) => onChange(d.key, x)} />;
           case 'select':
             return <Select key={d.key} label={d.label} value={String(v)} options={d.options} onChange={(x) => onChange(d.key, x)} />;
-          case 'text':
-            return <TextField key={d.key} label={d.label} value={String(v ?? '')} placeholder={d.placeholder} onChange={(x) => onChange(d.key, x)} />;
+          case 'text': {
+            const Field = d.multiline ? TextArea : TextField;
+            return <Field key={d.key} label={d.label} value={String(v ?? '')} placeholder={d.placeholder} onChange={(x) => onChange(d.key, x)} />;
+          }
           case 'seed':
             return (
               <div key={d.key} className="flex items-end gap-2">

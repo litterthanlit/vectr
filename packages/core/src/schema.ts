@@ -1,10 +1,12 @@
 import { isHex, normalizeHex } from './color.js';
+import { ELEMENTS, ELEMENT_ARTBOARD, elementDocForms } from './elements.js';
 import { DEFAULT_TRANSFORM, createForm, defaultName, uid } from './forms.js';
 import { clamp } from './math.js';
 import { migrateV1 } from './migrate.js';
 import { OPERATORS, opFor } from './operators/index.js';
 import { MAX_OPS } from './pipeline.js';
 import { RECIPES } from './recipes.js';
+import { cleanText } from './render.js';
 import { SOURCES, sourceFor } from './sources/index.js';
 import { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 import { THEMES } from './themes.js';
@@ -55,7 +57,7 @@ function sanitizeParam(def: ParamDef, v: unknown, fallback: Params[string], warn
       warn(`"${def.key}" must be one of: ${def.options.map((o) => o.value).join(', ')}`);
       return fallback;
     case 'text':
-      return typeof v === 'string' ? v.slice(0, LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
+      return typeof v === 'string' ? cleanText(v).slice(0, LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
   }
 }
 
@@ -88,12 +90,13 @@ const STYLE_BLOCK: BlockDef = {
 function sanitizeStyle(input: unknown, warn: (m: string) => void): Partial<Style> {
   if (input === undefined) return {};
   if (!isObj(input)) return (warn('style should be an object'), {});
-  const { stroke, ramp, ...rest } = input;
+  const { stroke, ramp, labelColor, ...rest } = input;
   const out = sanitizeParams(STYLE_BLOCK, rest, (m) => warn(`style: ${m.replace(' style param', '')}`)) as Partial<Style>;
-  if (stroke !== undefined) {
-    if (stroke === null) out.stroke = null;
-    else if (isHex(stroke)) out.stroke = normalizeHex(stroke);
-    else warn('style.stroke must be a hex colour or null');
+  for (const [key, v] of [['stroke', stroke], ['labelColor', labelColor]] as const) {
+    if (v === undefined) continue;
+    if (v === null) out[key] = null;
+    else if (isHex(v)) out[key] = normalizeHex(v);
+    else warn(`style.${key} must be a hex colour or null`);
   }
   if (ramp !== undefined) out.ramp = ramp === null ? null : sanitizeRamp(ramp, warn, 'style.ramp') ?? null;
   return out;
@@ -306,7 +309,7 @@ export function describeBlocks() {
         case 'select':
           return { ...base, type: 'enum', options: d.options.map((o) => o.value) };
         case 'text':
-          return { ...base, type: 'string', maxLength: LIMITS.maxText };
+          return { ...base, type: 'string', maxLength: LIMITS.maxText, ...(d.multiline ? { multiline: true } : {}) };
       }
     });
   return {
@@ -315,10 +318,14 @@ export function describeBlocks() {
     style: {
       params: params(STYLE_PARAMS, DEFAULT_STYLE as unknown as Params),
       stroke: 'hex colour or null (null = first ramp stop)',
+      labelColor: 'hex colour or null (null = colour of the nearest lines)',
       ramp: `array of 1–${LIMITS.maxRamp} hex colours, or null to use the document ramp`,
     },
     themes: THEMES,
     recipes: RECIPES.map((r) => ({ id: r.id, name: r.name, description: r.blurb })),
+    // Elements are several forms at once. Each `forms` entry can be pasted into a design's `forms` array as it is.
+    elements: ELEMENTS.map((e) => ({ id: e.id, name: e.name, description: e.blurb, forms: elementDocForms(e) })),
+    elementsNote: `Element forms are laid out for a ${ELEMENT_ARTBOARD}×${ELEMENT_ARTBOARD} design, centred on it. For another size, move them with the centre and multiply scale and style.labelSize by min(width, height)/${ELEMENT_ARTBOARD}.`,
     limits: { maxOps: MAX_OPS, ...LIMITS },
   };
 }

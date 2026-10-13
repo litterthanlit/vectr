@@ -66,7 +66,8 @@ export function mutate(form: Form, seed: number, strength = 0.3): Form {
   }
   const style = { ...form.style };
   if (r() < 0.25 * s * 2) style.colorBy = (['depth', 't', 'family'] as ColorBy[])[Math.floor(r() * 3)];
-  if (r() < 0.1 * s * 2) style.fill = style.fill === 'none' ? 'ribbons' : 'none';
+  // Closed-shape fills are structural (a card's panel), so mutation leaves them alone.
+  if (style.fill !== 'shapes' && r() < 0.1 * s * 2) style.fill = style.fill === 'none' ? 'ribbons' : 'none';
   if (r() < 0.08 * s * 2) style.markers = (['none', 'dot', 'ring', 'cross'] as MarkerShape[])[Math.floor(r() * 4)];
   return {
     ...form,
