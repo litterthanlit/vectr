@@ -1,4 +1,5 @@
 import { DEFAULT_TRANSFORM, createForm, type FormSpec } from './forms.js';
+import { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 import type { Form, Params, Style, Transform } from './types.js';
 
 /** One form of an element, with its position as an offset from the artboard centre. */
@@ -283,6 +284,26 @@ export const ELEMENTS: Element[] = [
     }],
   },
   {
+    id: 'memory-burst',
+    name: 'Memory burst',
+    blurb: 'Working memory blown apart: a dense core of slanted token blocks fused into ink, tearing into streaks and spray, the relevant ones in the accent',
+    forms: [{
+      name: 'Memory burst',
+      // A burst-layout field is already dense at its core and thin at its edge, so the operator only has to throw it outward.
+      // The ink finish needs solid fills, and the spray droplets (the form's only points) are drawn as big dots that survive it.
+      source: {
+        kind: 'context',
+        params: { layout: 'burst', tokens: 2000, rows: 56, falloff: 0.4, aspect: 1, variance: 0.8, height: 0.9, relevant: 0.14, cut: 'slant', cutAngle: 24, seed: 3 },
+      },
+      ops: [{ kind: 'burst', params: { mode: 'radial', shatter: 3, spray: 340, keepPoints: false, seed: 3 } }],
+      style: {
+        ...hair, width: 0.5, colorBy: 'family', fill: 'shapes', fillOpacity: 1,
+        markers: 'dot', markerSize: 8, markersByDepth: true, finish: 'ink',
+      },
+      transform: { scale: 380, ...flat },
+    }],
+  },
+  {
     id: 'linked-mark',
     name: 'Linked mark',
     blurb: 'A bold mark of two slabs joined by a thin neck: a vertical step on top, a 30° ramp below, and the second slab cut on a slant',
@@ -304,10 +325,21 @@ export const ELEMENTS: Element[] = [
 /** The artboard-relative scale for a document: elements grow and shrink with its shorter side. */
 export const elementScale = (width: number, height: number) => Math.min(width, height) / ELEMENT_ARTBOARD;
 
-/** A form's spec with its scale, offset and label size multiplied by k. */
-function scaled(spec: ElementForm, k: number): { spec: FormSpec; offset: { x: number; y: number } } {
+/** The smallest finish scale a document may hold (a finish can be drawn smaller than this, but not stored smaller). */
+const FINISH_SCALE_MIN = (STYLE_PARAMS.find((d) => d.key === 'finishScale') as { min: number }).min;
+
+/**
+ * A form's spec with its scale, offset, label size and finish scale multiplied by k. A finish is sized in pixels like a
+ * label, so it has to shrink and grow with the drawing or a small element would be all bleed. `minFinish` keeps what is
+ * stored in a document within the style's range; a thumbnail, which is never stored, passes none.
+ */
+function scaled(spec: ElementForm, k: number, minFinish = 0): { spec: FormSpec; offset: { x: number; y: number } } {
   const { offset, ...rest } = spec;
-  const style = rest.style?.labelSize !== undefined ? { ...rest.style, labelSize: rest.style.labelSize * k } : rest.style;
+  let style = rest.style;
+  if (style?.labelSize !== undefined) style = { ...style, labelSize: style.labelSize * k };
+  if (style?.finish && style.finish !== 'clean' && k !== 1) {
+    style = { ...style, finishScale: Math.max(minFinish, (style.finishScale ?? DEFAULT_STYLE.finishScale) * k) };
+  }
   const transform = { ...rest.transform, scale: (rest.transform?.scale ?? DEFAULT_TRANSFORM.scale) * k };
   return { spec: { ...rest, style, transform }, offset: { x: (offset?.x ?? 0) * k, y: (offset?.y ?? 0) * k } };
 }
@@ -329,7 +361,7 @@ export function placeElement(element: Element, width: number, height: number): F
 export function elementDocForms(element: Element, width = ELEMENT_ARTBOARD, height = ELEMENT_ARTBOARD) {
   const k = elementScale(width, height);
   return element.forms.map((f) => {
-    const { spec, offset } = scaled(f, k);
+    const { spec, offset } = scaled(f, k, FINISH_SCALE_MIN);
     const t = { ...DEFAULT_TRANSFORM, ...spec.transform };
     const out: Record<string, unknown> = {
       ...(spec.name ? { name: spec.name } : {}),
