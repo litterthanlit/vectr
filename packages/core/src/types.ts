@@ -92,6 +92,8 @@ export type LineDash = 'solid' | 'dotted' | 'dashed';
 export type LabelFont = 'mono' | 'sans' | 'serif';
 /** 'ribbons' fills between neighbouring lines of a band; 'shapes' fills every closed line. */
 export type FillMode = 'none' | 'ribbons' | 'shapes';
+/** A material for the whole form: ink bleeds and tears, grain speckles, rough wobbles the edges. Clean is plain vector. */
+export type Finish = 'clean' | 'ink' | 'grain' | 'rough';
 
 export interface Style {
   width: number;
@@ -122,6 +124,12 @@ export interface Style {
   /** Text colour; null = the colour of the form's nearest lines. */
   labelColor: string | null;
   opacity: number;
+  finish: Finish;
+  /** 0–1: how strongly the finish works on the form. */
+  finishAmount: number;
+  /** Size of the finish's features: 1 is tuned for a 1000–1600 px artboard, larger is coarser. */
+  finishScale: number;
+  finishSeed: number;
 }
 
 export interface Transform {

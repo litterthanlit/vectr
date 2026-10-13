@@ -265,6 +265,31 @@ describe('design lifecycle', () => {
     expect(f.ops[0]).toMatchObject({ kind: 'burst', params: { shatter: 2, spray: 80, keepPoints: true, mode: 'horizontal' } });
   });
 
+  it('takes a finish in the style, lists it, keeps it through an update, and previews it', async () => {
+    const style = textOf(await call('vectr_list_building_blocks', { block: 'style' }));
+    expect(style).toMatch(/`finish` \(Finish\)/);
+    expect(style).toMatch(/`finishAmount` \(Finish amount\)[^\n]*only when finish is ink\/grain\/rough/);
+
+    const r = await call('vectr_create_design', {
+      design: {
+        background: '#0B4A78',
+        forms: [{ source: { kind: 'context', params: { layout: 'burst', tokens: 300 } }, style: { fill: 'shapes', finish: 'ink', finishAmount: 0.6, finishScale: 1.2, finishSeed: 9 } }],
+      },
+      preview_width: 320,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    expect(Buffer.from(images(r)[0].data, 'base64').length).toBeGreaterThan(500);
+    expect((design(r).forms[0] as { style: Record<string, unknown> }).style).toMatchObject({ finish: 'ink', finishAmount: 0.6, finishScale: 1.2, finishSeed: 9 });
+    // A style change merges into the finish, and an unknown finish is refused at the boundary.
+    const u = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style: { finish: 'grain' } }], preview: false });
+    expect(u.isError).toBeFalsy();
+    expect((design(u).forms[0] as { style: Record<string, unknown> }).style).toMatchObject({ finish: 'grain', finishAmount: 0.6 });
+    const bad = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style: { finish: 'smudge' } }], preview: false });
+    expect(bad.isError).toBe(true);
+  });
+
   it('mutates a form and applies the chosen variation', async () => {
     await call('vectr_create_design', { recipe: 'pulse-bloom', preview: false });
     const before = JSON.stringify(design(await call('vectr_get_design', { design_id: 'd1' })));

@@ -98,6 +98,10 @@ const StyleInput = z
     labelFont: styleEnum('labelFont').optional().describe('Label typeface: mono, sans or serif'),
     labelColor: z.string().nullable().optional().describe('Colour (hex) of labels and card icons; null = colour of the nearest lines'),
     opacity: z.number().optional(),
+    finish: styleEnum('finish').optional().describe('A material for the whole form: ink fuses nearby pieces into solid ink with torn edges and spatter, grain speckles it like dry brush or print, rough wobbles the edges. Default clean'),
+    finishAmount: z.number().optional().describe('0–1, how strongly the finish works'),
+    finishScale: z.number().optional().describe('0.2–4, the size of the finish features; 1 suits an artboard 1000 to 1600 px wide'),
+    finishSeed: z.number().optional().describe('1–999'),
   })
   .loose();
 
