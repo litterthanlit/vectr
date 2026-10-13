@@ -78,7 +78,7 @@ const defaults = {
 };
 
 /** Rounded polygon via quadratic corners; `round` 0 keeps sharp corners. */
-function rounded(verts: Vec3[], round: number): Vec3[] {
+export function rounded(verts: Vec3[], round: number): Vec3[] {
   if (round <= 0) return verts;
   const t = Math.min(0.5, round * 0.5);
   const out: Vec3[] = [];

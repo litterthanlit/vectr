@@ -142,7 +142,7 @@ describe('compact + share links', () => {
 describe('describeBlocks', () => {
   it('lists sources, operators and style with typed params and defaults', () => {
     const b = describeBlocks();
-    expect(b.sources.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note']);
+    expect(b.sources.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card']);
     expect(b.operators.map((o) => o.kind)).toContain('revolve');
     for (const block of [...b.sources, ...b.operators]) for (const p of block.params) expect(p.default).not.toBeUndefined();
     expect(b.sources[0].params.find((p) => p.key === 'turns')).toMatchObject({ only_when: { key: 'shape', in: ['spiral'] } });
