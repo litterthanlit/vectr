@@ -813,3 +813,151 @@ describe('context', () => {
     expect(buildForm(doc.forms[0]).geometry.nodes.length).toBe(words(long.slice(0, 4000)).length);
   });
 });
+
+describe('connect focus', () => {
+  const connect = opFor('connect')!;
+  const threads = (source: { kind: string; params?: Record<string, unknown> }, params: Record<string, unknown> = {}) =>
+    stack(source, [{ kind: 'connect', params: { mode: 'focus', keepLines: false, ...params } }]);
+  const cloud = { kind: 'points', params: { count: 80, spread: 'ball', seed: 2 } };
+  const field = (params: Record<string, unknown> = {}) => ({ kind: 'context', params: { mark: 'dot', tokens: 600, rows: 40, relevant: 0.2, ...params } });
+  const last = (l: Polyline) => l.pts[l.pts.length - 1];
+
+  it('offers "To a point", with its params shown only for that mode and the old defaults untouched', () => {
+    expect(connect.params.find((p) => p.key === 'mode')).toMatchObject({ options: expect.arrayContaining([{ value: 'focus', label: 'To a point' }]) });
+    for (const key of ['fx', 'fy', 'fz', 'split', 'which', 'share', 'seed']) {
+      expect(connect.params.find((p) => p.key === key)!.when).toEqual({ key: 'mode', in: ['focus'] });
+    }
+    expect(connect.params.find((p) => p.key === 'fx')).toMatchObject({ min: -3, max: 3 });
+    expect(connect.params.find((p) => p.key === 'which')).toMatchObject({ options: ['all', 'relevant', 'share'].map((value) => expect.objectContaining({ value })) });
+    expect(connect.defaults).toMatchObject({ mode: 'nearest', k: 3, distance: 0.4, bow: 0, keepLines: true, maxLinks: 1500, fx: 0, fy: 1.2, fz: 0, split: false, which: 'all', share: 1 });
+  });
+
+  it('ends every thread exactly at the focus, from the point, with t running 0 to 1 and the point family', () => {
+    const g = threads(field(), { fx: 0.7, fy: -1.3, fz: 2 });
+    const nodes = stack(field()).nodes;
+    expect(g.lines).toHaveLength(nodes.length);
+    g.lines.forEach((l, i) => {
+      expect(l.pts).toHaveLength(2);
+      expect(l.pts[0]).toEqual(nodes[i].p);
+      expect(last(l)).toEqual([0.7, -1.3, 2]);
+      expect(l.t).toEqual([0, 1]);
+      expect(l.family).toBe(nodes[i].family);
+    });
+    // Without any params the focus is above the centre.
+    for (const l of threads(cloud).lines) expect(last(l)).toEqual([0, 1.2, 0]);
+  });
+
+  it('still ends at the focus when bowed, with t rising along every segment', () => {
+    for (const bow of [-0.6, 0.4, 1]) {
+      const g = threads(field(), { fx: 1, fy: 1.5, fz: 0, bow });
+      expect(g.lines.length).toBeGreaterThan(100);
+      for (const l of g.lines) {
+        expect(last(l)).toEqual([1, 1.5, 0]);
+        expect(l.pts.length).toBeGreaterThan(2);
+        expect(l.t).toHaveLength(l.pts.length);
+        expect(l.t![0]).toBe(0);
+        expect(l.t![l.t!.length - 1]).toBe(1);
+        expect(l.t!.every((t, i) => i === 0 || t > l.t![i - 1])).toBe(true);
+      }
+    }
+  });
+
+  it('sends points below the middle to the mirrored focus when split, and all to one focus otherwise', () => {
+    const nodes = stack(field()).nodes;
+    expect(nodes.some((n) => n.p[1] < 0) && nodes.some((n) => n.p[1] > 0)).toBe(true);
+    const params = { fx: 0.5, fy: 1.4, fz: 0.25 };
+    threads(field(), { ...params, split: true }).lines.forEach((l, i) => expect(last(l)).toEqual([0.5, nodes[i].p[1] < 0 ? -1.4 : 1.4, 0.25]));
+    for (const l of threads(field(), { ...params, split: false }).lines) expect(last(l)).toEqual([0.5, 1.4, 0.25]);
+  });
+
+  it('threads only family-1 nodes for "relevant"', () => {
+    const nodes = stack(field()).nodes;
+    const relevant = nodes.filter((n) => n.family === 1);
+    expect(relevant.length).toBeGreaterThan(40);
+    expect(relevant.length).toBeLessThan(nodes.length);
+    const g = threads(field(), { which: 'relevant' });
+    expect(g.lines).toHaveLength(relevant.length);
+    g.lines.forEach((l, i) => {
+      expect(l.family).toBe(1);
+      expect(l.pts[0]).toEqual(relevant[i].p);
+    });
+    expect(threads(field({ relevant: 0 }), { which: 'relevant' }).lines).toEqual([]);
+    // A point cloud has only family 0, so nothing is relevant there.
+    expect(threads(cloud, { which: 'relevant' }).lines).toEqual([]);
+  });
+
+  it('threads a seeded share of the points for "share", and ignores share otherwise', () => {
+    const big = { kind: 'context', params: { mark: 'dot', tokens: 1400, rows: 60, density: 1, falloff: 0, layout: 'window' } };
+    const n = stack(big).nodes.length;
+    expect(n).toBeGreaterThan(1000);
+    const count = (params: Record<string, unknown>) => threads(big, { which: 'share', ...params }).lines.length;
+    expect(count({ share: 0 })).toBe(0);
+    expect(count({ share: 1 })).toBe(n);
+    for (const share of [0.2, 0.5]) expect(Math.abs(count({ share }) / n - share)).toBeLessThan(0.05);
+    const starts = (seed: number) => threads(big, { which: 'share', share: 0.3, seed }).lines.map((l) => l.pts[0]);
+    expect(starts(4)).toEqual(starts(4));
+    expect(starts(4)).not.toEqual(starts(5));
+    expect(threads(cloud, { which: 'all', share: 0.1 }).lines).toHaveLength(80);
+  });
+
+  it('respects maxLinks, thinning evenly rather than keeping the first points', () => {
+    const g = threads(field({ tokens: 1500, rows: 60 }), { maxLinks: 100 });
+    expect(g.lines).toHaveLength(100);
+    const ys = g.lines.map((l) => l.pts[0][1]);
+    expect(Math.max(...ys)).toBeGreaterThan(0.5);
+    expect(Math.min(...ys)).toBeLessThan(-0.5);
+    expect(threads(cloud, { maxLinks: 10 }).lines).toHaveLength(10);
+  });
+
+  it('keeps the original lines, or not', () => {
+    const blocks = stack({ kind: 'context', params: { tokens: 200, rows: 20 } });
+    const kept = stack({ kind: 'context', params: { tokens: 200, rows: 20 } }, [{ kind: 'connect', params: { mode: 'focus', keepLines: true } }]);
+    expect(kept.lines.slice(0, blocks.lines.length)).toEqual(blocks.lines);
+    expect(kept.lines).toHaveLength(blocks.lines.length + blocks.nodes.length);
+    expect(threads({ kind: 'context', params: { tokens: 200, rows: 20 } }).lines).toHaveLength(blocks.nodes.length);
+    expect(kept.nodes).toEqual(blocks.nodes);
+  });
+
+  it('takes its points from the lines when there are no nodes', () => {
+    const g = threads({ kind: 'curve', params: { shape: 'circle' } }, { fx: 0, fy: 0, fz: 0 });
+    expect(g.lines.length).toBeGreaterThan(5);
+    for (const l of g.lines) expect(last(l)).toEqual([0, 0, 0]);
+  });
+
+  it('survives extreme values and an empty source', () => {
+    for (const params of [{ fx: 99, fy: -99, fz: Number.NaN }, { share: -4, which: 'share' }, { maxLinks: 0 }, { which: 'nope' }, { bow: 1, fx: 0, fy: 0, fz: 0 }]) {
+      expect(finite(threads(field(), params))).toBe(true);
+      expect(finite(threads(cloud, params))).toBe(true);
+    }
+    expect(connect.apply({ lines: [], nodes: [] }, { ...connect.defaults, mode: 'focus' })).toEqual({ lines: [], nodes: [], labels: undefined });
+  });
+
+  it('keeps the other modes exactly as they were, whatever the focus params say', () => {
+    const noise = { fx: 2, fy: -2, fz: 1, split: true, which: 'relevant', share: 0.1, seed: 9 };
+    for (const mode of ['nearest', 'within', 'sequence', 'hub']) {
+      const base = stack(cloud, [{ kind: 'connect', params: { mode } }]);
+      expect(stack(cloud, [{ kind: 'connect', params: { mode, ...noise } }])).toEqual(base);
+      expect(base.lines.length).toBeGreaterThan(0);
+    }
+    // Nearest neighbours: three links per point at most, each a straight two-point line from a point.
+    const near = stack(cloud, [{ kind: 'connect', params: {} }]);
+    expect(near.lines.every((l) => l.pts.length === 2)).toBe(true);
+    expect(near.lines.length).toBeGreaterThanOrEqual(80 * 3 / 2);
+    expect(near.lines.length).toBeLessThanOrEqual(80 * 3);
+    // The hub still converges on the centroid of the points.
+    const nodes = stack(cloud).nodes;
+    const centroid = [0, 1, 2].map((k) => nodes.reduce((s, n) => s + n.p[k], 0) / nodes.length);
+    const hub = stack(cloud, [{ kind: 'connect', params: { mode: 'hub', keepLines: false } }]);
+    expect(hub.lines).toHaveLength(80);
+    hub.lines.forEach((l, i) => {
+      l.pts[0].forEach((v, k) => expect(v).toBeCloseTo(centroid[k], 9));
+      expect(last(l)).toEqual(nodes[i].p);
+    });
+  });
+
+  it('is validated by parseDoc: focus is a mode, and the focus clamps to ±3', () => {
+    const { doc, warnings } = parseDoc({ forms: [{ source: { kind: 'points' }, ops: [{ kind: 'connect', params: { mode: 'focus', fy: 9, which: 'relevant', split: true } }] }] });
+    expect(warnings).toEqual([expect.stringMatching(/"fy" clamped to -3–3/)]);
+    expect(doc.forms[0].ops[0].params).toMatchObject({ mode: 'focus', fy: 3, which: 'relevant', split: true, fx: 0, fz: 0, share: 1 });
+  });
+});
