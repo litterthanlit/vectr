@@ -88,12 +88,13 @@ const STYLE_BLOCK: BlockDef = {
 function sanitizeStyle(input: unknown, warn: (m: string) => void): Partial<Style> {
   if (input === undefined) return {};
   if (!isObj(input)) return (warn('style should be an object'), {});
-  const { stroke, ramp, ...rest } = input;
+  const { stroke, ramp, labelColor, ...rest } = input;
   const out = sanitizeParams(STYLE_BLOCK, rest, (m) => warn(`style: ${m.replace(' style param', '')}`)) as Partial<Style>;
-  if (stroke !== undefined) {
-    if (stroke === null) out.stroke = null;
-    else if (isHex(stroke)) out.stroke = normalizeHex(stroke);
-    else warn('style.stroke must be a hex colour or null');
+  for (const [key, v] of [['stroke', stroke], ['labelColor', labelColor]] as const) {
+    if (v === undefined) continue;
+    if (v === null) out[key] = null;
+    else if (isHex(v)) out[key] = normalizeHex(v);
+    else warn(`style.${key} must be a hex colour or null`);
   }
   if (ramp !== undefined) out.ramp = ramp === null ? null : sanitizeRamp(ramp, warn, 'style.ramp') ?? null;
   return out;
@@ -315,6 +316,7 @@ export function describeBlocks() {
     style: {
       params: params(STYLE_PARAMS, DEFAULT_STYLE as unknown as Params),
       stroke: 'hex colour or null (null = first ramp stop)',
+      labelColor: 'hex colour or null (null = colour of the nearest lines)',
       ramp: `array of 1–${LIMITS.maxRamp} hex colours, or null to use the document ramp`,
     },
     themes: THEMES,

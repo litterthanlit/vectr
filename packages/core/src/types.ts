@@ -29,8 +29,17 @@ export interface GeoNode {
 
 export interface GeoLabel {
   p: Vec3;
+  /** May contain '\n' for explicit line breaks. */
   text: string;
   anchor?: 'start' | 'middle' | 'end';
+  /** Where the text block sits relative to p. 'bottom' (default) puts the last baseline at p. */
+  valign?: 'top' | 'middle' | 'bottom';
+  /** Maximum line width in unit space; longer lines are word-wrapped at render time. */
+  wrap?: number;
+  /** Size relative to the form's label size (default 1). */
+  size?: number;
+  /** Overrides the form's label font. */
+  font?: LabelFont;
 }
 
 export interface Geometry {
@@ -52,7 +61,7 @@ export type ParamDef = (
   | { key: string; label: string; kind: 'range'; min: number; max: number; step: number; unit?: string }
   | { key: string; label: string; kind: 'toggle' }
   | { key: string; label: string; kind: 'select'; options: { value: string; label: string }[] }
-  | { key: string; label: string; kind: 'text'; placeholder?: string }
+  | { key: string; label: string; kind: 'text'; placeholder?: string; multiline?: boolean }
   | { key: string; label: string; kind: 'seed' }
 ) & { when?: ParamWhen; help?: string };
 
@@ -77,9 +86,15 @@ export type HiddenStyle = 'fade' | 'dotted' | 'dashed' | 'solid' | 'hide';
 export type Taper = 'none' | 'depth' | 't';
 export type ColorBy = 'depth' | 't' | 'family';
 export type MarkerShape = 'none' | 'dot' | 'ring' | 'cross' | 'tick';
+export type LineDash = 'solid' | 'dotted' | 'dashed';
+export type LabelFont = 'mono' | 'sans' | 'serif';
+/** 'ribbons' fills between neighbouring lines of a band; 'shapes' fills every closed line. */
+export type FillMode = 'none' | 'ribbons' | 'shapes';
 
 export interface Style {
   width: number;
+  /** Pattern for lines facing the viewer. Hidden lines use `hidden` when it is dotted or dashed. */
+  dash: LineDash;
   /** Line weight and lightness vary along depth or along the curve. */
   taper: Taper;
   taperAmount: number;
@@ -91,14 +106,19 @@ export interface Style {
   ramp: string[] | null;
   /** How lines facing away from the viewer are drawn. */
   hidden: HiddenStyle;
-  fill: 'none' | 'ribbons';
+  fill: FillMode;
   fillOpacity: number;
+  /** Paint the document background under fills, so they hide forms beneath. */
+  knockout: boolean;
   markers: MarkerShape;
   markerSize: number;
   markerEvery: number;
   markersByDepth: boolean;
   labels: boolean;
   labelSize: number;
+  labelFont: LabelFont;
+  /** Text colour; null = the colour of the form's nearest lines. */
+  labelColor: string | null;
   opacity: number;
 }
 
