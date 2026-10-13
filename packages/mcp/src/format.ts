@@ -61,6 +61,7 @@ export function blocksMarkdown(kind?: string): string {
       '',
       `**Themes**: ${THEMES.map((t) => `${t.id} (bg ${t.background}, ramp ${t.ramp.join('→')})`).join('; ')}`,
       `**Recipes**: ${RECIPES.map((r) => `${r.id} — ${r.blurb}`).join('; ')}`,
+      `**Elements** (several forms at once, laid out for a 1000×1000 design; the JSON format lists their forms): ${b.elements.map((e) => `${e.id} — ${e.description}`).join('; ')}`,
       '',
     );
   }

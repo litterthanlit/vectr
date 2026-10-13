@@ -19,6 +19,7 @@ export type { FillBucket, MarkerBucket, ProjectedLabel, Projector, RenderedForm,
 export { LABEL_FONT, LABEL_FONTS, ROUGH_FILTER_ID, docToSVG, esc, formToSVG, roughFilterSVG } from './svg.js';
 export { ARTBOARD_SIZES, THEMES, themeFor, type Theme } from './themes.js';
 export { RECIPES, type Recipe } from './recipes.js';
+export { ELEMENTS, ELEMENT_ARTBOARD, elementDocForms, elementScale, placeElement, type Element, type ElementForm } from './elements.js';
 export { mutate, variations } from './mutate.js';
 export { accentFrom, isHex, sampleRamp } from './color.js';
 export {

@@ -278,7 +278,7 @@ function DocInspector() {
         </p>
       </div>
       <Section title="Theme">
-        <div className="grid grid-cols-5 gap-1.5">
+        <div className="grid grid-cols-6 gap-1.5">
           {THEMES.map((t) => {
             const active = doc.background === t.background && doc.ramp.join() === t.ramp.join();
             return (

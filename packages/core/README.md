@@ -38,7 +38,7 @@ const code = await encodeDoc(doc); // "v2.…" → https://your-vectr/#d=<code>
 | --- | --- |
 | `parseDoc(input)` | Accepts a saved file, a bare doc, a partial spec, a JSON string or a Vectr v1 design. Returns `{ doc, warnings }`; throws only when the input can't be a design. |
 | `docToSVG(doc)` | Standalone SVG. Every document string is escaped. |
-| `describeBlocks()` | Every source, operator and style option, with param types, ranges, defaults and `only_when` conditions. |
+| `describeBlocks()` | Every source, operator and style option, with param types, ranges, defaults and `only_when` conditions, plus themes, recipes and elements (ready-made multi-form pieces whose `forms` can be pasted into a design). |
 | `buildForm(form)` | Run a source and its operators: geometry plus warnings (point budget, skipped operators). |
 | `renderForm(form, ramp)` | Projected, bucketed strokes, fills, markers and labels. |
 | `mutate` / `variations` | Seeded variations of a form. |

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import {
-  RECIPES, createForm, createOp, opFor, parseDoc, sourceFor, uid,
+  ELEMENTS, RECIPES, createForm, createOp, opFor, parseDoc, placeElement, sourceFor, uid,
   type Doc, type Form, type FormSpec, type Op, type Params, type Style,
 } from '@vectr/core';
 
@@ -26,6 +26,8 @@ interface State {
   setMutateOpen(open: boolean): void;
 
   addForm(spec: FormSpec): void;
+  /** Add every form of a ready-made element, centred on the artboard and scaled to its size, as one undo step. */
+  addElement(id: string): void;
   updateForm(id: string, patch: Partial<Form>, key?: string): void;
   updateSource(id: string, patch: Params, key?: string): void;
   updateStyle(id: string, patch: Partial<Style>, key?: string): void;
@@ -118,6 +120,15 @@ export const useStore = create<State>((set, get) => ({
     );
     get().commit((d) => ({ ...d, forms: [...d.forms, form] }));
     set({ selectedId: form.id });
+  },
+  addElement(id) {
+    const element = ELEMENTS.find((e) => e.id === id);
+    if (!element) return;
+    // Sized from the artboard's shorter side, so an element reads the same on any artboard.
+    const forms = placeElement(element, get().doc.width, get().doc.height);
+    if (!forms.length) return;
+    get().commit((d) => ({ ...d, forms: [...d.forms, ...forms] }));
+    set({ selectedId: forms[0].id });
   },
   updateForm(id, patch, key) {
     get().commit((d) => mapForm(d, id, (f) => ({ ...f, ...patch })), key && `${id}:${key}`);

@@ -1,4 +1,5 @@
 import { isHex, normalizeHex } from './color.js';
+import { ELEMENTS, ELEMENT_ARTBOARD, elementDocForms } from './elements.js';
 import { DEFAULT_TRANSFORM, createForm, defaultName, uid } from './forms.js';
 import { clamp } from './math.js';
 import { migrateV1 } from './migrate.js';
@@ -322,6 +323,9 @@ export function describeBlocks() {
     },
     themes: THEMES,
     recipes: RECIPES.map((r) => ({ id: r.id, name: r.name, description: r.blurb })),
+    // Elements are several forms at once. Each `forms` entry can be pasted into a design's `forms` array as it is.
+    elements: ELEMENTS.map((e) => ({ id: e.id, name: e.name, description: e.blurb, forms: elementDocForms(e) })),
+    elementsNote: `Element forms are laid out for a ${ELEMENT_ARTBOARD}×${ELEMENT_ARTBOARD} design, centred on it. For another size, move them with the centre and multiply scale and style.labelSize by min(width, height)/${ELEMENT_ARTBOARD}.`,
     limits: { maxOps: MAX_OPS, ...LIMITS },
   };
 }
