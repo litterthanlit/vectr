@@ -44,9 +44,9 @@ with hairline graduations needs more than one. `vectr_update_design` places them
 
 | Field | |
 | --- | --- |
-| `id` | `globe`, `dial`, `orbit-shell`, `ruler`, `caption`, `gimbal`, `gauge`, `reticle` or `contour`. `vectr_list_building_blocks` describes each |
+| `id` | `globe`, `dial`, `orbit-shell`, `ruler`, `caption`, `gimbal`, `gauge`, `reticle`, `contour`, `context-window`, `attention`, `strip-field`, `memory-burst` or `linked-mark`. `vectr_list_building_blocks` describes each |
 | `x`, `y` | Where the element is centred, in artboard px. Default: the centre of the artboard |
-| `size` | Multiplies the element's size, spacing and label size (default 1, range 0.05–10) |
+| `size` | Multiplies the element's size, spacing, label size and finish scale (default 1, range 0.05–10) |
 
 Elements are laid out for the artboard's shorter side, so one reads the same on any
 artboard size, and they use the design's theme colours. Each form gets the next id

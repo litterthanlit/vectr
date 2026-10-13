@@ -15,7 +15,7 @@ Every form is a small pipeline:
 source                →  operators, applied top to bottom          →  style
 curve · lattice ·        revolve · sweep · repeat · mirror · warp      weight and colour follow depth,
 points · note · orbits   jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
-card · context · strip   ticks                                         markers, labels
+card · context · strip   ticks · burst                                  markers, labels, finishes
 ```
 
 A circle revolved with an offset is a torus; add a twist warp and it corkscrews. A wave
@@ -24,7 +24,7 @@ nearest neighbours, become a constellation. An arc revolved and resampled into b
 a globe; a circle with ticks is a dial. None of these are built in as fixed shapes;
 they come from combining blocks.
 
-- **8 sources, 11 operators**, each with its own settings, reorderable and toggleable.
+- **8 sources, 12 operators**, each with its own settings, reorderable and toggleable.
   `orbits` lays rings on a shell at many tilts (orbits, gimbals, atoms), `card` is a
   caption panel with a frame, an icon and word-wrapped text, `ticks` hatches every line
   (dials, rulers, combs) with long marks every Nth tick, and `resample` in dots mode can
@@ -33,14 +33,31 @@ they come from combining blocks.
   token blocks (paste text and each word becomes a block, or generate tokens), with
   reading order as `t` and relevance as `family`, so a two-stop ramp by family lights up
   what was retrieved. `connect` mode "To a point" runs threads from the tokens to a chosen
-  focus, which is attention: `split` fans them above and below. The Context window and
-  Attention elements are ready-made.
+  focus, which is attention: `split` fans them above and below. Blocks can end in a
+  forward slant (`cut`: slant, leaning `cutAngle`) and have rounded `corner`s. The
+  Context window and Attention elements are ready-made.
 - **Strips**: the `strip` source draws hyphenated ribbons: slabs joined by thinner necks,
   with a step or a ramp where they meet and square, slanted or round ends. Type a pattern
   (`#` a slab, `-` a neck, a space a gap), generate rows, or paste text and each word
   becomes a slab. Closed outlines fill solid; relevant slabs get their own outline in
   family 1, so a two-stop ramp by family picks them out, and `connect` mode "To a point"
   can thread from them. The Strip field and Linked mark elements are ready-made.
+- **Bursts**: the `burst` operator blows any form apart from a centre, which is what
+  context becomes when it is thrown out of working memory. Pieces near the centre
+  (`core`) stay put and merge; farther ones are pushed out (`strength`, `falloff`),
+  turned toward their flight (`align`), pulled into streaks (`stretch`) and thinned
+  (`scatter`), along ragged rays (`jitter`). `shatter` first cuts every closed shape
+  into vertical slices, `spray` throws droplets past the pieces (draw them with
+  `markers: dot`), and `mode: horizontal` keeps pieces level for a burst of bars. Shapes
+  stay closed, so fills still work. The Memory burst element is the whole look: a
+  context field, burst, ink finish, relevant fragments in the accent.
+- **Finishes**: a form can have a material, `finish`: `ink` fuses pieces that sit close
+  into solid ink with torn edges and spatter (use solid `shapes` fills at full opacity),
+  `grain` speckles fills and strokes like dry brush or a risograph print, and `rough`
+  wobbles the edges, a per-form version of Hand-drawn. `finishAmount`, `finishScale` and
+  `finishSeed` tune it. A finish is an SVG filter, so the app, exported SVG and PNG
+  previews agree, and a clean form has none. Ink is the heaviest effect: large PNG
+  renders of it take a few seconds.
 - **A signature style**: lines thin and lighten with depth, colour runs along an OKLab
   ramp (by depth, along the line, or per copy), back faces fade, optional ribbon fills
   between neighbouring lines and markers on points. Classic dotted or dashed hidden
@@ -53,14 +70,16 @@ they come from combining blocks.
 - **Mutate**: press `M` to see six variations of the selected form, click one to adopt
   it, and keep evolving. Subtle, medium or wild.
 - **Elements**: ready-made pieces in the left panel (Globe, Dial, Orbit shell, Ruler,
-  Caption, Gimbal, Gauge, Reticle, Contour). A form has a single line weight, so each
+  Caption, Gimbal, Gauge, Reticle, Contour, Context window, Attention, Strip field,
+  Memory burst, Linked mark). A form has a single line weight, so each
   element is several forms placed together, such as a heavy bezel over fine graduations.
   They scale with the artboard, name no colours and follow whatever theme is active.
 - **Recipes**: twelve starting points (Pulse bloom, Strata, Constellation, Tidal field,
   Coil garden, Vessel, Meander, Loom knot, and the instrument plates Meridian,
   Gyroscope, Orrery and Sonar), all built from the same blocks.
-- **Themes**: Graphite, Signal, Kiln, Ozone, Bloom, Fog. Each is a background plus a
-  colour ramp, and the interface accent follows it.
+- **Themes**: Graphite, Signal, Kiln, Ozone, Bloom, Fog, Deep. Each is a background plus a
+  colour ramp, and the interface accent follows it. Deep is a deep blue with a ramp from
+  white to a light blue, which colours a form by family as white with light-blue accents.
 - **Export and share**: SVG, SVG to clipboard, 2× PNG, project JSON, or a share link that
   holds the whole design in the URL. Vectr v1 files and links are converted on open.
 - Undo and redo, autosave, spin animation, keyboard shortcuts, responsive layout.
