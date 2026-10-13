@@ -1,6 +1,7 @@
 import { TAU, clamp, int, lerp, num, smoothstep, str } from '../math.js';
 import { cleanText } from '../render.js';
 import type { GeoNode, Polyline, SourceDef } from '../types.js';
+import { highlightSet, isRelevant, rand } from './words.js';
 
 type Layout = 'window' | 'burst' | 'radial';
 type Mark = 'block' | 'line' | 'dot';
@@ -21,21 +22,6 @@ const MAX_TOKENS = 3000;
 /** Rays start this far from the centre (the field's half-size is 1), so they do not all pile onto one point. */
 const HOLE = 0.05;
 
-/**
- * A stateless random number in [0, 1) for a seed, a stream and two indices. Every row, slot and
- * stream draws its own, so changing the token count or any one param never reshuffles the rest.
- */
-function rand(seed: number, stream: number, a = 0, b = 0): number {
-  let h = Math.imul(seed | 0, 0x9e3779b1) ^ 0x7f4a7c15;
-  for (const v of [stream, a, b]) {
-    h = Math.imul(h ^ (v | 0), 0x85ebca6b);
-    h ^= h >>> 13;
-    h = Math.imul(h, 0xc2b2ae35);
-    h ^= h >>> 16;
-  }
-  return (h >>> 0) / 4294967296;
-}
-
 /** Smooth value noise in [0, 1]. */
 function vnoise(seed: number, stream: number, x: number, y: number): number {
   const [ix, iy] = [Math.floor(x), Math.floor(y)];
@@ -46,9 +32,6 @@ function vnoise(seed: number, stream: number, x: number, y: number): number {
 
 /** The share of a slot a token fills: grows with `k` but never quite closes the gap to the next token. */
 const fraction = (k: number) => Math.min(0.94, 1 - Math.exp(-1.8 * k));
-
-/** Normalise a word for matching: lower case, punctuation off both ends. */
-const norm = (w: string) => w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 
 /** Streams of random numbers, one per decision, so that decisions stay independent. */
 const S = { slot: 2, len: 3, rel: 4, depth: 5, blank: 6, short: 7, fill: 8, ragged: 9, keep: 10, off: 14, ray: 15, rayslot: 16, word: 40 } as const;
@@ -177,7 +160,7 @@ interface Word {
  * (several collapse to one). Words in `highlight` are relevant; with no highlight, a seeded share is.
  */
 function parseText(text: string, highlight: string, relevant: number, seed: number): Word[][] {
-  const marked = new Set(highlight.split(/[,\s]+/).map(norm).filter(Boolean));
+  const marked = highlightSet(highlight);
   const lines: Word[][] = [];
   let count = 0;
   for (const line of cleanText(text).split('\n')) {
@@ -185,7 +168,7 @@ function parseText(text: string, highlight: string, relevant: number, seed: numb
     for (const w of line.split(/\s+/)) {
       if (!w || count >= MAX_TOKENS) continue;
       const roll = rand(seed, S.word, count++);
-      words.push({ n: Math.min(24, [...w].length), rel: (marked.size ? marked.has(norm(w)) : roll < relevant) ? 1 : 0 });
+      words.push({ n: Math.min(24, [...w].length), rel: isRelevant(marked, w, roll, relevant) });
     }
     if (words.length || (lines.length && lines[lines.length - 1].length)) lines.push(words);
   }

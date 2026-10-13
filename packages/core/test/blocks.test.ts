@@ -15,7 +15,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 describe('registration', () => {
   it('lists the new blocks in order', () => {
-    expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card', 'context']);
+    expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card', 'context', 'strip']);
     expect(OPERATORS[OPERATORS.length - 1].kind).toBe('ticks');
   });
 });
@@ -959,5 +959,709 @@ describe('connect focus', () => {
     const { doc, warnings } = parseDoc({ forms: [{ source: { kind: 'points' }, ops: [{ kind: 'connect', params: { mode: 'focus', fy: 9, which: 'relevant', split: true } }] }] });
     expect(warnings).toEqual([expect.stringMatching(/"fy" clamped to -3–3/)]);
     expect(doc.forms[0].ops[0].params).toMatchObject({ mode: 'focus', fy: 3, which: 'relevant', split: true, fx: 0, fz: 0, share: 1 });
+  });
+});
+
+describe('strip', () => {
+  const strip = (params: Record<string, unknown> = {}, ops: { kind: string; params?: Record<string, unknown> }[] = []) => stack({ kind: 'strip', params }, ops);
+  const outlines = (g: Geometry) => g.lines.filter((l) => l.family === 0);
+  const overlays = (g: Geometry) => g.lines.filter((l) => l.family === 1);
+  const xs = (l: Polyline) => l.pts.map((q) => q[0]);
+  const ys = (l: Polyline) => l.pts.map((q) => q[1]);
+  const lo = (a: number[]) => Math.min(...a);
+  const hi = (a: number[]) => Math.max(...a);
+  /** The y of each row that has a slab, top to bottom. */
+  const rowsOf = (g: Geometry) => {
+    const out: number[] = [];
+    for (const y of g.nodes.map((n) => n.p[1]).sort((a, b) => b - a)) if (!out.length || out[out.length - 1] - y > 1e-9) out.push(y);
+    return out;
+  };
+  const tan = (deg: number) => Math.tan((deg * Math.PI) / 180);
+  /** Sharp, square and simple: the outline is its corners, so measurements can be read straight off it. */
+  const SHARP = { corner: 0, startEnd: 'square', finishEnd: 'square' };
+
+  /** Whether two segments properly cross. */
+  const cross = (a: Vec3, b: Vec3, c: Vec3, d: Vec3) => {
+    const side = (p: Vec3, q: Vec3, r: Vec3) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
+  };
+  /** Distance from a point to a segment. */
+  const near = (p: Vec3, a: Vec3, b: Vec3) => {
+    const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+    const u = Math.min(1, Math.max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(p[0] - a[0] - u * dx, p[1] - a[1] - u * dy);
+  };
+  /** A polygon is simple when no two edges cross, and no corner lies on an edge that is not its own. */
+  const simple = (pts: Vec3[]) => {
+    const n = pts.length;
+    if (n < 3) return false;
+    for (let i = 0; i < n; i++) {
+      const [a, b] = [pts[i], pts[(i + 1) % n]];
+      if (len(sub(a, b)) < 1e-12) return false;
+      for (let j = i + 1; j < n; j++) {
+        const [c, d] = [pts[j], pts[(j + 1) % n]];
+        if (!(j === i + 1 || (i === 0 && j === n - 1)) && cross(a, b, c, d)) return false;
+        for (const k of [j, (j + 1) % n]) if (k !== i && k !== (i + 1) % n && near(pts[k], a, b) < 1e-9) return false;
+        for (const k of [i, (i + 1) % n]) if (k !== j && k !== (j + 1) % n && near(pts[k], c, d) < 1e-9) return false;
+      }
+    }
+    return true;
+  };
+  /** The bottom and top of a polygon along the vertical line x. */
+  const extent = (pts: Vec3[], x: number): [number, number] => {
+    const found: number[] = [];
+    pts.forEach((a, i) => {
+      const b = pts[(i + 1) % pts.length];
+      if ((a[0] - x) * (b[0] - x) <= 0 && a[0] !== b[0]) found.push(a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0]));
+    });
+    return [lo(found), hi(found)];
+  };
+  /** The edges of a polygon, as pairs of points. */
+  const edges = (pts: Vec3[]) => pts.map((a, i) => [a, pts[(i + 1) % pts.length]] as const);
+
+  it('draws the default as one hyphenated mark: a closed outline and a node for each of its two slabs', () => {
+    const g = strip();
+    expect(g.lines).toHaveLength(1);
+    expect(g.lines[0]).toMatchObject({ closed: true, tone: 'front', family: 0 });
+    expect(g.lines[0].normals).toBeUndefined();
+    expect(g.nodes).toHaveLength(2);
+    expect(g.nodes.map((n) => n.family)).toEqual([0, 0]);
+    expect(g.nodes[1].p[0]).toBeGreaterThan(g.nodes[0].p[0]);
+    // The field is centred on the origin, flat.
+    const c = strip(SHARP).lines[0];
+    expect(lo(xs(c)) + hi(xs(c))).toBeCloseTo(0, 9);
+    expect(lo(ys(c)) + hi(ys(c))).toBeCloseTo(0, 9);
+    expect(g.lines[0].pts.every((q) => q[2] === 0)).toBe(true);
+  });
+
+  it('reads a pattern: # a slab, - a neck, a space or . a gap, a new line a new row', () => {
+    const one = strip({ pattern: '###---####' });
+    expect(one.lines).toHaveLength(1);
+    expect(one.lines[0].closed).toBe(true);
+    expect(one.nodes).toHaveLength(2);
+    for (const pattern of ['## ##', '##.##', '##  ##']) {
+      const g = strip({ pattern });
+      expect(g.lines).toHaveLength(2);
+      expect(g.nodes).toHaveLength(2);
+    }
+    expect(strip({ pattern: '##-##' }).lines).toHaveLength(1);
+    const rows = strip({ pattern: '###-###\n#####\n##' });
+    expect(rows.lines).toHaveLength(3);
+    expect(rowsOf(rows)).toHaveLength(3);
+    // Rows stack top to bottom at an even pitch, and the whole field is centred.
+    const [a, b, c] = rowsOf(rows);
+    expect(a - b).toBeCloseTo(b - c, 9);
+    expect(a + c).toBeCloseTo(0, 9);
+    const gaps = strip({ pattern: '## ## ##' }).nodes.map((n) => n.p[0]);
+    expect(gaps).toEqual([...gaps].sort((x, y) => x - y));
+  });
+
+  it('turns unknown characters into gaps, and survives empty, blank and odd patterns', () => {
+    expect(strip({ pattern: '##x##' }).lines).toHaveLength(2);
+    for (const pattern of ['', ' ', '\n\n', '...', '\t', '-', '---', '#', '- -', 'abc', '#\n\n#', '\r\n#-#\r\n', '#'.repeat(4000), '#-'.repeat(2000), '\n'.repeat(4000) + '#']) {
+      const g = strip({ pattern });
+      expect(finite(g)).toBe(true);
+      expect(g.lines.every((l) => l.closed && l.pts.length >= 3)).toBe(true);
+    }
+    expect(strip({ pattern: '' }).lines).toEqual([]);
+    // A neck on its own is a bar with no slab to mark.
+    const neck = strip({ pattern: '---' });
+    expect(neck.lines).toHaveLength(1);
+    expect(neck.nodes).toEqual([]);
+    // Leading gaps indent a row; trailing ones change nothing.
+    expect(strip({ pattern: '##   ' })).toEqual(strip({ pattern: '##' }));
+    expect(strip({ pattern: '  ##\n######' }).nodes[0].p[0]).toBeGreaterThan(strip({ pattern: '##\n######' }).nodes[0].p[0]);
+  });
+
+  const MATRIX = {
+    ramp: [0, 1, 30, 75],
+    rampEdge: ['both', 'top', 'bottom'],
+    neckAlign: ['center', 'top', 'bottom'],
+    corner: [0, 0.08, 0.5],
+    startEnd: ['square', 'slant', 'round'],
+    finishEnd: ['square', 'slant', 'round'],
+  } as const;
+
+  it('draws every outline as a simple polygon, across ramps, neck positions, corners and ends', () => {
+    // Chains of every shape: a lone slab, short slabs between necks, a neck at either end, several rows.
+    const patterns = ['###--######', '#-#-#-#', '##-#', '#', '-#-', '#---#---#', '##\n#-##- #\n###'];
+    // Each param over its whole range against a busy base, the extremes of the rest, and random mixes of everything.
+    const base = { ramp: 30, rampEdge: 'both', neckAlign: 'center', corner: 0.08, startEnd: 'slant', finishEnd: 'round', neck: 0.5, slant: 30, height: 0.9 };
+    const cases: Record<string, unknown>[] = [{}];
+    for (const [key, values] of Object.entries(MATRIX)) for (const value of values) cases.push({ [key]: value });
+    for (const [key, values] of Object.entries({ neck: [0.1, 0.9], slant: [0, 60], height: [0.1, 1], gap: [0.05, 3], aspect: [0.25, 4] })) for (const value of values) cases.push({ [key]: value });
+    let seed = 7;
+    const pick = <T,>(a: readonly T[]) => a[(seed = (seed * 1103515245 + 12345) % 2147483648) % a.length];
+    for (let i = 0; i < 30; i++) cases.push(Object.fromEntries(Object.entries(MATRIX).map(([k, v]) => [k, pick(v as readonly unknown[])])));
+    let checked = 0;
+    for (const extra of cases) {
+      for (const pattern of patterns) {
+        for (const l of strip({ ...base, ...extra, pattern }).lines) {
+          expect(simple(l.pts), JSON.stringify({ ...extra, pattern })).toBe(true);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(500);
+    // The overlays of relevant slabs are polygons too.
+    for (const extra of cases.slice(0, 30)) {
+      const g = strip({ ...base, ...extra, mode: 'generate', rows: 6, segments: 7, relevant: 0.6, necks: 0.6 });
+      expect(overlays(g).length).toBeGreaterThan(5);
+      for (const l of g.lines) expect(simple(l.pts), JSON.stringify(extra)).toBe(true);
+    }
+  });
+
+  it('makes the neck neck × the slab height tall, in every position', () => {
+    for (const neckAlign of ['center', 'top', 'bottom']) {
+      for (const neck of [0.2, 0.5, 0.8]) {
+        const g = strip({ pattern: '#####----#####', neck, neckAlign });
+        const pts = g.lines[0].pts;
+        const slab = extent(pts, g.nodes[0].p[0]);
+        const h = slab[1] - slab[0];
+        // The middle of the neck is halfway between the two slab centres.
+        const [b, t] = extent(pts, (g.nodes[0].p[0] + g.nodes[1].p[0]) / 2);
+        expect(t - b).toBeCloseTo(neck * h, 9);
+        const flush = neckAlign === 'top' ? slab[1] - t : neckAlign === 'bottom' ? b - slab[0] : slab[1] - t - (b - slab[0]);
+        expect(flush).toBeCloseTo(0, 9);
+      }
+    }
+  });
+
+  it('steps one edge of a joint and ramps the other, at the ramp angle, the ramp lying on the slab', () => {
+    const joint = (params: Record<string, unknown>) => strip({ pattern: '#####----#####', ...SHARP, ...params }).lines[0].pts;
+    const slopes = (pts: Vec3[]) => edges(pts).filter(([a, b]) => Math.abs(a[0] - b[0]) > 1e-9 && Math.abs(a[1] - b[1]) > 1e-9);
+    const uprights = (pts: Vec3[]) => edges(pts).filter(([a, b]) => Math.abs(a[0] - b[0]) < 1e-9);
+    const angle = ([a, b]: readonly [Vec3, Vec3]) => ((Math.atan2(Math.abs(b[1] - a[1]), Math.abs(b[0] - a[0])) * 180) / Math.PI);
+
+    // Ramp on the bottom: a step on top at each side of the neck, a 30° slope below it, and the two ends of the chain.
+    const pts = joint({ ramp: 30, rampEdge: 'bottom' });
+    expect(slopes(pts)).toHaveLength(2);
+    expect(uprights(pts)).toHaveLength(2 + 2);
+    const h = hi(pts.map((q) => q[1])) - lo(pts.map((q) => q[1]));
+    for (const e of slopes(pts)) {
+      expect(angle(e)).toBeCloseTo(30, 9);
+      // The neck drops a quarter of the slab's height at each edge, so the ramp runs that far over tan 30°.
+      expect(Math.abs(e[1][0] - e[0][0])).toBeCloseTo((h * 0.25) / tan(30), 9);
+      expect(Math.abs(e[1][1] - e[0][1])).toBeCloseTo(h * 0.25, 9);
+    }
+    // The same on the top edge when the ramp is there, with the steps below.
+    const top = joint({ ramp: 30, rampEdge: 'top' });
+    expect(slopes(top)).toHaveLength(2);
+    expect(slopes(top).every(([a, b]) => a[1] > 0 && b[1] > 0)).toBe(true);
+    expect(slopes(pts).every(([a, b]) => a[1] < 0 && b[1] < 0)).toBe(true);
+    // Both edges ramp, or neither: ramp 0 is a vertical step, and the outline is all right angles.
+    expect(slopes(joint({ ramp: 45, rampEdge: 'both' }))).toHaveLength(4);
+    expect(uprights(joint({ ramp: 45, rampEdge: 'both' }))).toHaveLength(2);
+    const flat = joint({ ramp: 0, rampEdge: 'both' });
+    expect(flat).toHaveLength(12);
+    expect(slopes(flat)).toHaveLength(0);
+    // The neck is exactly as many units long as it was asked, because the ramps sit on the slabs.
+    for (const ramp of [0, 30, 75]) {
+      const g = strip({ pattern: '###-----###', ...SHARP, ramp, rampEdge: 'both' }).lines[0].pts;
+      const [y0, y1] = [lo(g.map((q) => q[1])), hi(g.map((q) => q[1]))];
+      const unit = (hi(g.map((q) => q[0])) - lo(g.map((q) => q[0]))) / 11;
+      const necks = g.filter((q) => q[1] > y0 + 1e-9 && q[1] < y1 - 1e-9).map((q) => q[0]);
+      expect(hi(necks) - lo(necks)).toBeCloseTo(5 * unit, 9);
+    }
+  });
+
+  it('keeps a ramp from eating more than 45% of the slab it sits on', () => {
+    // A 3° ramp would run for many slab lengths, so it is cut short and steepened.
+    const g = strip({ pattern: '##-######', ...SHARP, ramp: 3, rampEdge: 'bottom' });
+    const pts = g.lines[0].pts;
+    const [x0, x1] = [lo(pts.map((q) => q[0])), hi(pts.map((q) => q[0]))];
+    const unit = (x1 - x0) / 9;
+    expect(simple(pts)).toBe(true);
+    const floor = lo(pts.map((q) => q[1]));
+    // The first slab's bottom edge runs flat for 55% of its two units, and the ramp covers the other 45%.
+    const flat = pts.filter((q) => Math.abs(q[1] - floor) < 1e-9).map((q) => q[0]).sort((a, b) => a - b);
+    expect(flat[1] - x0).toBeCloseTo(2 * unit * 0.55, 9);
+    // The slab after the neck loses 45% of its six units.
+    expect(flat[flat.length - 2] - (x0 + 3 * unit)).toBeCloseTo(6 * unit * 0.45, 9);
+    // Steep ramps are left as they are.
+    expect(simple(strip({ pattern: '#-#-#', ...SHARP, ramp: 75, rampEdge: 'both' }).lines[0].pts)).toBe(true);
+  });
+
+  it('cuts the finish end on the slant, the bottom corner reaching further right than the top, and the start end the other way', () => {
+    for (const slant of [10, 18, 45]) {
+      const g = strip({ pattern: '#####--#######', ...SHARP, finishEnd: 'slant', slant });
+      const pts = g.lines[0].pts;
+      const [y0, y1] = [lo(ys(g.lines[0])), hi(ys(g.lines[0]))];
+      const right = (y: number) => hi(pts.filter((q) => Math.abs(q[1] - y) < 1e-9).map((q) => q[0]));
+      const left = (y: number) => lo(pts.filter((q) => Math.abs(q[1] - y) < 1e-9).map((q) => q[0]));
+      expect(right(y0) - right(y1)).toBeCloseTo((y1 - y0) * tan(slant), 9);
+      // The bottom corner is the far right of the outline, and the start stays square.
+      expect(right(y0)).toBe(hi(xs(g.lines[0])));
+      expect(left(y0)).toBeCloseTo(left(y1), 9);
+    }
+    const start = strip({ pattern: '#####--#######', ...SHARP, startEnd: 'slant', slant: 18 });
+    const [y0, y1] = [lo(ys(start.lines[0])), hi(ys(start.lines[0]))];
+    const left = (y: number) => lo(start.lines[0].pts.filter((q) => Math.abs(q[1] - y) < 1e-9).map((q) => q[0]));
+    expect(left(y1) - left(y0)).toBeCloseTo((y1 - y0) * tan(18), 9);
+    // Slanting is a lean from vertical, so 0° is square; and with rounded corners the corners still reach out, just rounder.
+    expect(strip({ pattern: '#####--#######', ...SHARP, finishEnd: 'slant', slant: 0 }).lines[0].pts).toEqual(strip({ pattern: '#####--#######', ...SHARP }).lines[0].pts);
+    const rounded = strip({ pattern: '#####--#######', finishEnd: 'slant', slant: 30 }).lines[0];
+    expect(hi(xs(rounded)) - hi(rounded.pts.filter((q) => q[1] > 0).map((q) => q[0]))).toBeGreaterThan(0);
+    // A short slab with a steep slant is cut back rather than crossing itself.
+    expect(simple(strip({ pattern: '#', ...SHARP, startEnd: 'slant', finishEnd: 'slant', slant: 60 }).lines[0].pts)).toBe(true);
+  });
+
+  it('cuts a round end as a semicircle of half the slab height', () => {
+    const g = strip({ pattern: '#####', corner: 0.08, startEnd: 'round', finishEnd: 'round' });
+    const pts = g.lines[0].pts;
+    const [y0, y1] = [lo(ys(g.lines[0])), hi(ys(g.lines[0]))];
+    const r = (y1 - y0) / 2;
+    const [x0, x1] = [lo(xs(g.lines[0])), hi(xs(g.lines[0]))];
+    for (const [cx, side] of [[x0 + r, -1], [x1 - r, 1]] as const) {
+      const arc = pts.filter((q) => side * (q[0] - cx) > 1e-9);
+      expect(arc.length).toBeGreaterThan(8);
+      for (const q of arc) expect(Math.hypot(q[0] - cx, q[1] - (y0 + y1) / 2)).toBeCloseTo(r, 9);
+    }
+    // A slab shorter than its own height is cut back to what fits.
+    expect(simple(strip({ pattern: '#', corner: 0.5, startEnd: 'round', finishEnd: 'round' }).lines[0].pts)).toBe(true);
+  });
+
+  it('rounds corners with an absolute radius, never more than half the shorter edge beside them', () => {
+    const slab = (params: Record<string, unknown>) => strip({ pattern: '#####', startEnd: 'square', finishEnd: 'square', height: 0.5, ...params }).lines[0];
+    const [sharp, soft] = [slab({ corner: 0 }), slab({ corner: 0.2 })];
+    expect(sharp.pts).toHaveLength(4);
+    const [y0, y1] = [lo(ys(sharp)), hi(ys(sharp))];
+    const h = y1 - y0;
+    // The footprint is unchanged, and the straight top edge stops one radius short of each end.
+    for (const f of [xs, ys]) {
+      expect(lo(f(soft))).toBeCloseTo(lo(f(sharp)), 9);
+      expect(hi(f(soft))).toBeCloseTo(hi(f(sharp)), 9);
+    }
+    const top = soft.pts.filter((q) => Math.abs(q[1] - y1) < 1e-9).map((q) => q[0]);
+    expect(lo(top) - lo(xs(sharp))).toBeCloseTo(0.2 * h, 9);
+    expect(hi(xs(sharp)) - hi(top)).toBeCloseTo(0.2 * h, 9);
+    // Radius is absolute: as a share of the slab height it does not depend on the slab's length.
+    const long = strip({ pattern: '#########', startEnd: 'square', finishEnd: 'square', height: 0.5, corner: 0.2 }).lines[0];
+    const lt = long.pts.filter((q) => Math.abs(q[1] - hi(ys(long))) < 1e-9).map((q) => q[0]);
+    expect((lo(lt) - lo(xs(long))) / (hi(ys(long)) - lo(ys(long)))).toBeCloseTo(0.2, 9);
+    // At a step shorter than twice the radius the corners are cut back to half of it, and the neck keeps its height.
+    const step = strip({ pattern: '###-###', corner: 0.5, neck: 0.8, ramp: 0, startEnd: 'square', finishEnd: 'square' });
+    expect(simple(step.lines[0].pts)).toBe(true);
+    const [b, t] = extent(step.lines[0].pts, 0);
+    const [sb, st] = extent(step.lines[0].pts, step.nodes[0].p[0]);
+    expect(t - b).toBeCloseTo(0.8 * (st - sb), 9);
+  });
+
+  it('sets the gap in slab heights, and the slab height as a share of the row spacing', () => {
+    for (const gap of [0.4, 1, 2.5]) {
+      const [a, b] = strip({ pattern: '## ##', ...SHARP, gap }).lines;
+      expect(lo(xs(b)) - hi(xs(a))).toBeCloseTo(gap * (hi(ys(a)) - lo(ys(a))), 9);
+    }
+    // Each gap character is one gap, so two make a gap of two.
+    const [one, two, three] = strip({ pattern: '#  #  #', ...SHARP, gap: 1 }).lines;
+    expect(lo(xs(two)) - hi(xs(one))).toBeCloseTo(lo(xs(three)) - hi(xs(two)), 9);
+    const [x, y] = strip({ pattern: '## ##', ...SHARP, gap: 1 }).lines, [x2, y2] = strip({ pattern: '##  ##', ...SHARP, gap: 1 }).lines;
+    expect((lo(xs(y2)) - hi(xs(x2))) / (hi(ys(x2)) - lo(ys(x2)))).toBeCloseTo(2, 9);
+    expect((lo(xs(y)) - hi(xs(x))) / (hi(ys(x)) - lo(ys(x)))).toBeCloseTo(1, 9);
+    for (const height of [0.3, 0.7, 1]) {
+      const g = strip({ pattern: '#####\n#####', ...SHARP, height, aspect: 0.25 });
+      const [a, b] = g.lines;
+      const h = hi(ys(a)) - lo(ys(a));
+      expect(h / (g.nodes[0].p[1] - g.nodes[1].p[1])).toBeCloseTo(height, 9);
+      expect(hi(ys(b)) - lo(ys(b))).toBeCloseTo(h, 9);
+    }
+  });
+
+  it('fits the field to the aspect like the lattice, and the widest row spans it', () => {
+    for (const aspect of [0.25, 1, 1.6, 4]) {
+      const ax = Math.sqrt(aspect), ay = 1 / ax;
+      for (const params of [{}, { mode: 'generate' }, { mode: 'text', columns: 20 }, { pattern: '#-#\n###########\n##' }]) {
+        const g = strip({ aspect, ...params });
+        const all = g.lines.flatMap((l) => l.pts);
+        expect(lo(all.map((v) => v[0]))).toBeGreaterThanOrEqual(-ax - 1e-9);
+        expect(hi(all.map((v) => v[0]))).toBeLessThanOrEqual(ax + 1e-9);
+        expect(lo(all.map((v) => v[1]))).toBeGreaterThanOrEqual(-ay - 1e-9);
+        expect(hi(all.map((v) => v[1]))).toBeLessThanOrEqual(ay + 1e-9);
+      }
+      const wide = strip({ aspect, pattern: '#####-#####', ...SHARP }).lines[0];
+      expect(lo(xs(wide))).toBeCloseTo(-ax, 9);
+      expect(hi(xs(wide))).toBeCloseTo(ax, 9);
+    }
+    // Generated rows fill the field's height, from the top row to the bottom one, about its middle.
+    const rows = strip({ mode: 'generate', rows: 24, aspect: 1, ...SHARP, height: 1 }).lines.flatMap(ys);
+    expect(hi(rows)).toBeGreaterThan(0.9);
+    expect(hi(rows) + lo(rows)).toBeCloseTo(0, 9);
+  });
+
+  it('keeps a few rows no taller than a line of text, centred in the field', () => {
+    // One short pattern row in a wide, tall field is not blown up to fill it: it keeps the proportions of a bar.
+    const g = strip({ pattern: '#####-#####', ...SHARP, aspect: 1 }).lines[0];
+    expect((hi(xs(g)) - lo(xs(g))) / (hi(ys(g)) - lo(ys(g)))).toBeGreaterThan(5);
+    expect(lo(ys(g)) + hi(ys(g))).toBeCloseTo(0, 9);
+  });
+
+  it('aligns ragged rows to the left, or centres each of them', () => {
+    const pattern = '#########\n####\n######';
+    const left = strip({ pattern, ...SHARP });
+    for (const l of left.lines) expect(lo(xs(l))).toBeCloseTo(lo(xs(left.lines[0])), 9);
+    const mid = strip({ pattern, ...SHARP, align: 'center' });
+    for (const l of mid.lines) expect(lo(xs(l)) + hi(xs(l))).toBeCloseTo(0, 9);
+    expect(lo(xs(mid.lines[1]))).toBeGreaterThan(lo(xs(mid.lines[0])));
+    // Gaps count towards a row's length.
+    const gappy = strip({ pattern: '## ##\n#####', ...SHARP, align: 'center' });
+    for (const l of gappy.lines.slice(0, 2)) expect(l.pts.length).toBeGreaterThan(3);
+    expect(lo(gappy.lines.flatMap(xs)) + hi(gappy.lines.flatMap(xs))).toBeCloseTo(0, 9);
+  });
+
+  it('gives t as the position along each row: 0 at its first mark, 1 at its last, rising with x', () => {
+    const g = strip({ pattern: '###-####\n##', ...SHARP });
+    for (const l of g.lines) expect(l.t).toHaveLength(l.pts.length);
+    for (const l of g.lines) {
+      expect(lo(l.t!)).toBeCloseTo(0, 9);
+      expect(hi(l.t!)).toBeCloseTo(1, 9);
+      l.pts.forEach((q, i) => expect(l.t![i]).toBeCloseTo((q[0] - lo(xs(l))) / (hi(xs(l)) - lo(xs(l))), 9));
+    }
+    // The nodes sit at the centres of their slabs, so their t falls between 0 and 1 and grows along the row.
+    expect(g.nodes[0].t).toBeGreaterThan(0);
+    expect(g.nodes[1].t).toBeGreaterThan(g.nodes[0].t!);
+    expect(g.nodes[1].t).toBeLessThan(1);
+    // Slants and round corners leave the ends of every row inside 0–1.
+    for (const l of strip({ mode: 'text', relevant: 0.4, startEnd: 'slant', finishEnd: 'round' }).lines) {
+      expect(lo(l.t!)).toBeGreaterThanOrEqual(0);
+      expect(hi(l.t!)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  describe('generated rows', () => {
+    const gen = (params: Record<string, unknown> = {}) => strip({ mode: 'generate', ...params });
+    const family0 = (g: Geometry) => JSON.stringify([outlines(g), g.nodes.map((n) => n.p)]);
+
+    it('makes `rows` rows of `segments` slabs, left to right, top to bottom', () => {
+      for (const [rows, segments] of [[1, 2], [12, 9], [5, 40], [80, 3]]) {
+        const g = gen({ rows, segments });
+        expect(rowsOf(g)).toHaveLength(rows);
+        expect(g.nodes).toHaveLength(rows * segments);
+        for (const y of rowsOf(g)) {
+          const row = g.nodes.filter((n) => Math.abs(n.p[1] - y) < 1e-9).map((n) => n.p[0]);
+          expect(row).toHaveLength(segments);
+          expect(row).toEqual([...row].sort((a, b) => a - b));
+        }
+      }
+    });
+
+    it('is deterministic per seed and differs across seeds', () => {
+      expect(gen({ seed: 3 })).toEqual(gen({ seed: 3 }));
+      expect(JSON.stringify(gen({ seed: 3 }))).not.toBe(JSON.stringify(gen({ seed: 4 })));
+    });
+
+    it('moves no outline when `relevant` changes: only which slabs get an overlay', () => {
+      const none = gen({ relevant: 0 }), some = gen({ relevant: 0.3 }), all = gen({ relevant: 1 });
+      expect(overlays(none)).toHaveLength(0);
+      expect(family0(some)).toBe(family0(none));
+      expect(family0(all)).toBe(family0(none));
+      expect(overlays(some).length).toBeGreaterThan(5);
+      expect(overlays(some).length).toBeLessThan(overlays(all).length);
+      expect(overlays(all)).toHaveLength(all.nodes.length);
+      expect(some.nodes.filter((n) => n.family === 1)).toHaveLength(overlays(some).length);
+      // A smaller share keeps its slabs: they are a subset of a larger share's.
+      const marked = (g: Geometry) => g.nodes.map((n, i) => (n.family ? i : -1)).filter((i) => i >= 0);
+      expect(marked(gen({ relevant: 0.1 })).every((i) => marked(some).includes(i))).toBe(true);
+    });
+
+    it('does not reshuffle one decision when another param changes', () => {
+      // The draws are stateless: more rows add rows below, and the neck share moves joints but never which slabs are relevant.
+      const small = gen({ rows: 6, segments: 6, relevant: 0.3 }), tall = gen({ rows: 9, segments: 6, relevant: 0.3 });
+      expect(tall.nodes.slice(0, 36).map((n) => n.family)).toEqual(small.nodes.slice(0, 36).map((n) => n.family));
+      expect(gen({ necks: 0.2, relevant: 0.3 }).nodes.map((n) => n.family)).toEqual(gen({ necks: 0.8, relevant: 0.3 }).nodes.map((n) => n.family));
+      expect(gen({ variance: 0.1, relevant: 0.3 }).nodes.map((n) => n.family)).toEqual(gen({ variance: 0.9, relevant: 0.3 }).nodes.map((n) => n.family));
+    });
+
+    it('spreads slab lengths with `variance`, and chains them by the share of `necks`', () => {
+      const widths = (g: Geometry) => outlines(g).map((l) => hi(xs(l)) - lo(xs(l)));
+      const sd = (a: number[]) => Math.sqrt(a.reduce((s, v) => s + (v - a.reduce((p, q) => p + q, 0) / a.length) ** 2, 0) / a.length);
+      const even = widths(gen({ variance: 0, necks: 0, ...SHARP }));
+      expect(sd(even)).toBeLessThan(sd(widths(gen({ variance: 1, necks: 0, ...SHARP }))));
+      // With no variance every slab has the same length, to a unit of rounding.
+      expect(sd(even) / (even.reduce((a, b) => a + b, 0) / even.length)).toBeLessThan(0.05);
+      expect(outlines(gen({ necks: 0, rows: 5, segments: 6 }))).toHaveLength(30);
+      expect(outlines(gen({ necks: 1, rows: 5, segments: 6 }))).toHaveLength(5);
+      const chains = (necks: number) => outlines(gen({ necks, rows: 40, segments: 10 })).length;
+      expect(chains(0.2)).toBeGreaterThan(chains(0.5));
+      expect(chains(0.5)).toBeGreaterThan(chains(0.8));
+    });
+
+    it('stays within the point budget at the largest settings, and builds quickly', () => {
+      const t = performance.now();
+      for (const params of [{ rows: 80, segments: 40, relevant: 1, necks: 1 }, { rows: 80, segments: 40, relevant: 0.1 }, { rows: 40, segments: 40, necks: 1, relevant: 0.5, corner: 0.5, ramp: 75 }]) {
+        const r = buildForm(make({ kind: 'strip', params: { mode: 'generate', ...params } }));
+        expect(r.warnings).toEqual([]);
+        expect(finite(r.geometry)).toBe(true);
+        expect(r.geometry.lines.reduce((n, l) => n + l.pts.length, 0) + r.geometry.nodes.length).toBeLessThan(POINT_BUDGET);
+      }
+      // With the default share of relevant slabs the largest field stays near 30k points.
+      const typical = stack({ kind: 'strip', params: { mode: 'generate', rows: 80, segments: 40 } });
+      expect(typical.lines.reduce((n, l) => n + l.pts.length, 0) + typical.nodes.length).toBeLessThan(35_000);
+      expect(performance.now() - t).toBeLessThan(5000);
+    });
+  });
+
+  describe('pasted text', () => {
+    const text = (t: string, params: Record<string, unknown> = {}) => strip({ mode: 'text', text: t, ...params });
+    const PARAGRAPH = 'The model reads every token in its window. Attention, though, is not spread evenly: a few passages matter most! Retrieval puts them there; context decides.';
+    const words = (t: string) => t.split(/\s+/).filter(Boolean);
+
+    it('makes one slab per word, in reading order, wrapping at `columns`', () => {
+      const g = text(PARAGRAPH, { columns: 120 });
+      expect(g.nodes).toHaveLength(words(PARAGRAPH).length);
+      const wrapped = text(PARAGRAPH, { columns: 24 });
+      expect(wrapped.nodes).toHaveLength(words(PARAGRAPH).length);
+      expect(rowsOf(wrapped).length).toBeGreaterThan(rowsOf(g).length);
+      const n = wrapped.nodes;
+      for (let i = 1; i < n.length; i++) expect(n[i].p[1] < n[i - 1].p[1] - 1e-9 || (Math.abs(n[i].p[1] - n[i - 1].p[1]) < 1e-9 && n[i].p[0] > n[i - 1].p[0])).toBe(true);
+      // No row holds more characters than the columns (a neck counts as one).
+      const row = (y: number) => wrapped.nodes.filter((q) => Math.abs(q.p[1] - y) < 1e-9).length;
+      expect(Math.max(...rowsOf(wrapped).map(row))).toBeLessThan(24);
+    });
+
+    it('sizes a slab by the letters of its word, whatever the punctuation', () => {
+      const g = text('aa. bbbb! (cccccc)', { ...SHARP, columns: 120 });
+      expect(g.lines).toHaveLength(3);
+      const w = outlines(g).map((l) => hi(xs(l)) - lo(xs(l)));
+      expect(w[1] / w[0]).toBeCloseTo(2, 9);
+      expect(w[2] / w[0]).toBeCloseTo(3, 9);
+      // A slab is at most 24 letters long, however long the word.
+      const capped = outlines(text(`${'x'.repeat(40)}. ${'y'.repeat(24)}`, { ...SHARP, columns: 120 })).map((l) => hi(xs(l)) - lo(xs(l)));
+      expect(capped).toHaveLength(2);
+      expect(capped[0]).toBeCloseTo(capped[1], 9);
+    });
+
+    it('joins words with necks, and breaks the chain after a sentence end, at a double space or a tab', () => {
+      const run = (t: string) => text(t, { columns: 120 }).lines.length;
+      expect(run('aa bbbb cc dd')).toBe(1);
+      expect(run('aa bbbb. cc dd')).toBe(2);
+      expect(run('aa bbbb.  cc dd')).toBe(2);
+      expect(run('aa bbbb? cc! dd')).toBe(3);
+      expect(run('aa  bb')).toBe(2);
+      expect(run('aa\tbb')).toBe(2);
+      expect(run('"Done." Next')).toBe(2);
+      expect(run('Wait... what')).toBe(2);
+      // An abbreviation or a number with a point inside is not a sentence end.
+      expect(run('about 3.5 times')).toBe(1);
+    });
+
+    it('starts a new row at a new line, and shows a run of blank lines as one empty row', () => {
+      const g = text('one two\nthree\n\n\n\nfour five');
+      const [r0, r1, r2] = rowsOf(g);
+      expect(rowsOf(g)).toHaveLength(3);
+      expect(r1 - r2).toBeCloseTo(2 * (r0 - r1), 9);
+      // A blank line takes the place of a row: the same three rows, with the middle one empty.
+      const [a0, a1] = rowsOf(text('one\n\ntwo')), [b0, b1] = rowsOf(text('one\ntwo\nsix'));
+      expect(a0 - a1).toBeCloseTo(2 * (b0 - b1), 9);
+      // Blank lines at either end are dropped, leaving one centred row.
+      const lone = text('\n\none\n\n');
+      expect(lone.nodes).toHaveLength(1);
+      expect(lone.nodes[0].p[1]).toBeCloseTo(0, 9);
+    });
+
+    it('marks highlighted words relevant: an overlay and a family-1 node each, ignoring case and punctuation', () => {
+      const g = text(PARAGRAPH, { highlight: 'attention, CONTEXT', columns: 120 });
+      expect(g.nodes.map((n, i) => (n.family === 1 ? words(PARAGRAPH)[i] : null)).filter(Boolean)).toEqual(['Attention,', 'context']);
+      expect(overlays(g)).toHaveLength(2);
+      // The share is ignored while there is a list, and used when there is none.
+      expect(text(PARAGRAPH, { highlight: 'attention', relevant: 1 }).nodes.filter((n) => n.family === 1)).toHaveLength(1);
+      expect(text(PARAGRAPH, { relevant: 0.5, seed: 9 }).nodes.filter((n) => n.family === 1).length).toBeGreaterThan(3);
+      expect(text(PARAGRAPH, { relevant: 0 }).lines.every((l) => l.family === 0)).toBe(true);
+      // Highlighting moves nothing.
+      expect(JSON.stringify(outlines(g))).toBe(JSON.stringify(outlines(text(PARAGRAPH, { columns: 120 }))));
+    });
+
+    it('agrees with the context source about which words are relevant', () => {
+      const ctx = stack({ kind: 'context', params: { text: PARAGRAPH, highlight: 'attention, matter', layout: 'window' } });
+      expect(text(PARAGRAPH, { highlight: 'attention, matter', columns: 120 }).nodes.map((n) => n.family)).toEqual(ctx.nodes.map((n) => n.family));
+      // With no list the seeded roll is the same draw, too.
+      const seeded = stack({ kind: 'context', params: { text: PARAGRAPH, relevant: 0.3, seed: 11 } });
+      expect(text(PARAGRAPH, { relevant: 0.3, seed: 11 }).nodes.map((n) => n.family)).toEqual(seeded.nodes.map((n) => n.family));
+    });
+
+    it('keeps 4000 characters of text through parseDoc, and of a pattern too', () => {
+      const long = 'word '.repeat(900);
+      const { doc, warnings } = parseDoc({
+        forms: [
+          { source: { kind: 'strip', params: { mode: 'text', text: long, highlight: long } } },
+          { source: { kind: 'strip', params: { pattern: '#-'.repeat(2000) } } },
+        ],
+      });
+      expect(warnings).toEqual([]);
+      expect(String(doc.forms[0].source.params.text)).toHaveLength(4000);
+      expect(String(doc.forms[0].source.params.highlight)).toHaveLength(200);
+      expect(String(doc.forms[1].source.params.pattern)).toHaveLength(4000);
+      const g = buildForm(doc.forms[0]);
+      expect(g.warnings).toEqual([]);
+      expect(g.geometry.nodes).toHaveLength(words(long.slice(0, 4000)).length);
+      expect(finite(g.geometry)).toBe(true);
+      expect(buildForm(doc.forms[1]).warnings).toEqual([]);
+    });
+
+    it('survives words made only of symbols, huge words, and thousands of words', () => {
+      expect(text('— – … ---').lines).toEqual([]);
+      expect(text('a — b').nodes).toHaveLength(2);
+      const huge = text('x'.repeat(500) + ' y', { columns: 8 });
+      expect(finite(huge)).toBe(true);
+      expect(huge.nodes).toHaveLength(2);
+      const many = text('lorem ipsum dolor sit amet '.repeat(150), { columns: 60 });
+      expect(finite(many)).toBe(true);
+      expect(many.nodes).toHaveLength(750);
+    });
+  });
+
+  it('draws the relevant slabs after every other outline, in family 1, inside the outline they paint', () => {
+    for (const params of [{ mode: 'generate', relevant: 0.3 }, { mode: 'text', relevant: 0.3 }]) {
+      const g = strip(params);
+      const first = g.lines.findIndex((l) => l.family === 1);
+      expect(first).toBeGreaterThan(0);
+      expect(g.lines.slice(0, first).every((l) => l.family === 0)).toBe(true);
+      expect(g.lines.slice(first).every((l) => l.family === 1 && l.closed && l.tone === 'front')).toBe(true);
+      expect(g.lines.slice(first)).toHaveLength(g.nodes.filter((n) => n.family === 1).length);
+      // Each overlay is centred on its slab's node, and lies within the outline it paints.
+      const marked = g.nodes.filter((n) => n.family === 1);
+      g.lines.slice(first).forEach((o, i) => {
+        const base = outlines(g).find((b) => lo(xs(b)) <= marked[i].p[0] && hi(xs(b)) >= marked[i].p[0] && lo(ys(b)) <= marked[i].p[1] && hi(ys(b)) >= marked[i].p[1])!;
+        expect(base).toBeTruthy();
+        expect(lo(xs(o))).toBeGreaterThanOrEqual(lo(xs(base)) - 1e-9);
+        expect(hi(xs(o))).toBeLessThanOrEqual(hi(xs(base)) + 1e-9);
+        expect(lo(ys(o))).toBeGreaterThanOrEqual(lo(ys(base)) - 1e-9);
+        expect(hi(ys(o))).toBeLessThanOrEqual(hi(ys(base)) + 1e-9);
+        expect(o.t).toHaveLength(o.pts.length);
+      });
+    }
+    // A lone slab's overlay is its outline: the same footprint and the same corner radius.
+    const solo = strip({ mode: 'generate', rows: 1, segments: 2, necks: 0, relevant: 1, variance: 0 });
+    expect(solo.lines).toHaveLength(4);
+    solo.lines.slice(0, 2).forEach((base, i) => expect(solo.lines[i + 2].pts).toEqual(base.pts));
+  });
+
+  it('paints a relevant slab the way it is cut: its ramps and slanted end, without the neck', () => {
+    const chain = (highlight: string, params: Record<string, unknown> = {}) =>
+      strip({ mode: 'text', text: 'aaaa bbbbbb cccc', highlight, columns: 40, corner: 0, startEnd: 'square', finishEnd: 'slant', slant: 18, ramp: 30, ...params });
+    const g = chain('bbbbbb');
+    expect(outlines(g)).toHaveLength(1);
+    const [o] = overlays(g);
+    // A middle slab is a rectangle with a chamfer under each neck: a vertical side, then the 30° ramp, on both sides.
+    const slopes = edges(o.pts).filter(([a, b]) => Math.abs(a[0] - b[0]) > 1e-9 && Math.abs(a[1] - b[1]) > 1e-9);
+    expect(slopes).toHaveLength(2);
+    for (const [a, b] of slopes) expect((Math.atan2(Math.abs(b[1] - a[1]), Math.abs(b[0] - a[0])) * 180) / Math.PI).toBeCloseTo(30, 9);
+    const [x0, x1] = [lo(xs(o)), hi(xs(o))];
+    // Where the overlay's sides meet a neck they run the full height, straight.
+    expect(edges(o.pts).filter(([a, b]) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[0] - x0) < 1e-9 && Math.abs(a[1] - b[1]) > 0)).toHaveLength(1);
+    expect(edges(o.pts).filter(([a, b]) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[0] - x1) < 1e-9 && Math.abs(a[1] - b[1]) > 0)).toHaveLength(1);
+    // Nothing of an overlay hangs outside the outline it paints.
+    for (const highlight of ['aaaa', 'bbbbbb', 'cccc']) {
+      for (const params of [{}, { rampEdge: 'both' }, { finishEnd: 'round', startEnd: 'slant' }, { neckAlign: 'top' }]) {
+        const h = chain(highlight, params);
+        for (const [a, b] of edges(overlays(h)[0].pts)) {
+          const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+          const [bottom, top] = extent(outlines(h)[0].pts, m[0]);
+          expect(m[1]).toBeGreaterThanOrEqual(bottom - 1e-9);
+          expect(m[1]).toBeLessThanOrEqual(top + 1e-9);
+        }
+      }
+    }
+    // The last slab keeps the slant of the chain's end.
+    const l = overlays(chain('cccc'))[0];
+    const [yb, yt] = [lo(ys(l)), hi(ys(l))];
+    const right = (y: number) => hi(l.pts.filter((q) => Math.abs(q[1] - y) < 1e-9).map((q) => q[0]));
+    expect(right(yb) - right(yt)).toBeCloseTo((yt - yb) * tan(18), 9);
+  });
+
+  it('draws solid shapes with a fill: one colour per family, the relevant slabs painted last', () => {
+    const form = make({ kind: 'strip', params: { mode: 'generate', relevant: 0.2 } });
+    form.style = { ...form.style, fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp', taper: 'none' };
+    const r = renderForm(form, ['#223344', '#ddeeff']);
+    expect(r.fills).toHaveLength(2);
+    expect(r.fills.every((f) => f.opacity === 1 && f.d.length > 0)).toBe(true);
+    expect(r.fills[0].color).toBe('#223344');
+    expect(r.fills[1].color).toBe('#ddeeff');
+    const geo = buildForm(form).geometry;
+    expect(r.fills[0].d.match(/M/g)).toHaveLength(outlines(geo).length);
+    expect(r.fills[1].d.match(/M/g)).toHaveLength(overlays(geo).length);
+    expect(r.fills.every((f) => !/NaN|Infinity/.test(f.d))).toBe(true);
+    expect(r.warnings).toEqual([]);
+    // Without a fill it is an outline.
+    const outline = renderForm(make({ kind: 'strip' }), ['#223344', '#ddeeff']);
+    expect(outline.fills).toEqual([]);
+    expect(outline.strokes.length).toBeGreaterThan(0);
+    // The default pattern, filled, is one solid mark.
+    const mark = make({ kind: 'strip' });
+    mark.style = { ...mark.style, fill: 'shapes', fillOpacity: 1 };
+    expect(renderForm(mark, ['#223344', '#ddeeff']).fills).toHaveLength(1);
+  });
+
+  it('feeds connect focus and markers: attention leaves the relevant slabs, and dots sit on slab centres', () => {
+    const params = { mode: 'generate', rows: 8, segments: 5, relevant: 0.3 };
+    const g = stack({ kind: 'strip', params }, [{ kind: 'connect', params: { mode: 'focus', which: 'relevant', fx: 1.8, fy: 0, keepLines: false } }]);
+    const marked = stack({ kind: 'strip', params }).nodes.filter((n) => n.family === 1);
+    expect(marked.length).toBeGreaterThan(3);
+    expect(g.lines).toHaveLength(marked.length);
+    g.lines.forEach((l, i) => {
+      expect(l.pts[0]).toEqual(marked[i].p);
+      expect(l.pts[l.pts.length - 1]).toEqual([1.8, 0, 0]);
+      expect(l.family).toBe(1);
+    });
+    const dots = make({ kind: 'strip', params: { mode: 'generate' } });
+    dots.style = { ...dots.style, markers: 'dot' };
+    expect(renderForm(dots, ['#222222', '#ffffff']).markers.length).toBeGreaterThan(0);
+  });
+
+  it('describes its params to agents, each shown only in the mode that uses it', () => {
+    const block = describeBlocks().sources.find((s) => s.kind === 'strip')!;
+    const param = (key: string) => block.params.find((q) => q.key === key)!;
+    expect(block.name).toBe('Strip');
+    expect(block.description).toMatch(/slab/i);
+    expect(param('mode')).toMatchObject({ type: 'enum', options: ['pattern', 'generate', 'text'], default: 'pattern' });
+    expect(param('pattern')).toMatchObject({ type: 'string', multiline: true, maxLength: 4000, only_when: { key: 'mode', in: ['pattern'] } });
+    expect(param('text')).toMatchObject({ type: 'string', multiline: true, maxLength: 4000, only_when: { key: 'mode', in: ['text'] } });
+    expect(param('highlight')).toMatchObject({ only_when: { key: 'mode', in: ['text'] } });
+    expect(param('columns')).toMatchObject({ min: 8, max: 120, only_when: { key: 'mode', in: ['text'] } });
+    for (const key of ['rows', 'segments', 'variance', 'necks']) expect(param(key)).toMatchObject({ only_when: { key: 'mode', in: ['generate'] } });
+    for (const key of ['relevant', 'seed']) expect(param(key)).toMatchObject({ only_when: { key: 'mode', in: ['generate', 'text'] } });
+    expect(param('rows')).toMatchObject({ min: 1, max: 80, default: 12 });
+    expect(param('segments')).toMatchObject({ min: 2, max: 40, default: 9 });
+    expect(param('ramp')).toMatchObject({ min: 0, max: 75, default: 30 });
+    expect(param('slant')).toMatchObject({ min: 0, max: 60, default: 18 });
+    expect(param('height')).toMatchObject({ min: 0.1, max: 1, default: 0.7 });
+    expect(param('neck')).toMatchObject({ min: 0.1, max: 0.9, default: 0.5 });
+    expect(param('corner')).toMatchObject({ min: 0, max: 0.5, default: 0.08 });
+    expect(param('gap')).toMatchObject({ min: 0.05, max: 3, default: 0.4 });
+    expect(param('aspect')).toMatchObject({ min: 0.25, max: 4, default: 1.6 });
+    expect(param('neckAlign')).toMatchObject({ options: ['center', 'top', 'bottom'], default: 'center' });
+    expect(param('rampEdge')).toMatchObject({ options: ['both', 'top', 'bottom'], default: 'bottom' });
+    expect(param('startEnd')).toMatchObject({ options: ['square', 'slant', 'round'], default: 'square' });
+    expect(param('finishEnd')).toMatchObject({ options: ['square', 'slant', 'round'], default: 'slant' });
+    expect(param('align')).toMatchObject({ options: ['left', 'center'], default: 'left' });
+  });
+
+  it('is validated by parseDoc: ranges clamp, unknown values fall back, and the defaults need no corrections', () => {
+    expect(parseDoc({ forms: [{ source: { kind: 'strip' } }] }).warnings).toEqual([]);
+    const { doc, warnings } = parseDoc({ forms: [{ source: { kind: 'strip', params: { ramp: 90, slant: -4, rows: 200, finishEnd: 'point', mode: 'poem' } } }] });
+    expect(warnings).toHaveLength(5);
+    expect(doc.forms[0].source.params).toMatchObject({ ramp: 75, slant: 0, rows: 80, finishEnd: 'slant', mode: 'pattern' });
+    expect(finite(buildForm(doc.forms[0]).geometry)).toBe(true);
+  });
+
+  it('never throws, whatever it is given', () => {
+    const odd = { height: 99, neck: -3, ramp: 500, slant: 500, corner: 9, gap: 0, aspect: 0, rows: 0, segments: 0, columns: 0, variance: 9, necks: -1, relevant: 9, seed: -4 };
+    for (const mode of ['pattern', 'generate', 'text']) {
+      for (const params of [odd, {}, { pattern: '#-# #\n', text: '', rows: 1, segments: 1 }, { height: 0, neck: 0, gap: 0 }, { height: NaN, neck: Infinity, slant: NaN }]) {
+        const g = strip({ mode, text: 'one two. three', ...params });
+        expect(finite(g)).toBe(true);
+        for (const l of g.lines) expect(l.pts.length).toBeGreaterThanOrEqual(3);
+      }
+    }
+    expect(finite(strip({ mode: 'text', text: 'a '.repeat(3000) }))).toBe(true);
+  });
+
+  it('is varied by Mutate without touching its pattern or text', () => {
+    const base: Form = make({ kind: 'strip', params: { pattern: '##-##\n###', text: 'some words here' } });
+    for (const v of variations(base, 12, 5, 1)) {
+      expect(v.source.params.pattern).toBe('##-##\n###');
+      expect(v.source.params.text).toBe('some words here');
+      expect(finite(buildForm(v).geometry)).toBe(true);
+    }
+    for (const v of variations(make({ kind: 'strip', params: { mode: 'generate' } }), 12, 5, 1)) expect(finite(buildForm(v).geometry)).toBe(true);
   });
 });
