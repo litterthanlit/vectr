@@ -1,7 +1,13 @@
 import { OPERATORS, RECIPES, SOURCES, THEMES, describeBlocks } from '@vectr/core';
 import type { Design, DesignStore } from './designs.js';
 
-const fmt = (v: unknown) => (typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : JSON.stringify(v));
+/** Long text (a card's caption, a note's label) is shortened in summaries; response_format "json" has it whole. */
+const TEXT_PREVIEW = 48;
+const fmt = (v: unknown) => {
+  if (typeof v === 'number') return String(Math.round(v * 1000) / 1000);
+  if (typeof v === 'string' && v.length > TEXT_PREVIEW) return JSON.stringify(`${v.slice(0, TEXT_PREVIEW - 1).trimEnd()}…`);
+  return JSON.stringify(v);
+};
 const kv = (o: unknown) => (o && typeof o === 'object' ? Object.entries(o as Record<string, unknown>).map(([k, v]) => `${k}=${fmt(v)}`).join(', ') : '');
 
 /** One-screen summary of a design: what an agent needs to decide its next edit. */
@@ -61,7 +67,9 @@ export function blocksMarkdown(kind?: string): string {
       '',
       `**Themes**: ${THEMES.map((t) => `${t.id} (bg ${t.background}, ramp ${t.ramp.join('→')})`).join('; ')}`,
       `**Recipes**: ${RECIPES.map((r) => `${r.id} — ${r.blurb}`).join('; ')}`,
-      `**Elements** (several forms at once, laid out for a 1000×1000 design; the JSON format lists their forms): ${b.elements.map((e) => `${e.id} — ${e.description}`).join('; ')}`,
+      '',
+      '**Elements** are ready-made pieces of several forms each (line weight is per form, so they layer hairlines with heavy rings). Place one with vectr_update_design → add_elements: [{ "id", "x"?, "y"?, "size"? }], then refine its forms with update_forms:',
+      ...b.elements.map((e) => `- \`${e.id}\` ${e.name} (${e.forms.length} form${e.forms.length === 1 ? '' : 's'}): ${e.description}`),
       '',
     );
   }
@@ -78,7 +86,7 @@ export function blocksMarkdown(kind?: string): string {
   section('Sources', b.sources);
   section('Operators', b.operators);
   if (!kind || kind === 'style') {
-    out.push('## Style', `- \`stroke\`: ${b.style.stroke}`, `- \`ramp\`: ${b.style.ramp}`);
+    out.push('## Style', `- \`stroke\`: ${b.style.stroke}`, `- \`labelColor\`: ${b.style.labelColor}`, `- \`ramp\`: ${b.style.ramp}`);
     for (const p of b.style.params) out.push(paramLine(p as ParamInfo));
   }
   return out.join('\n');

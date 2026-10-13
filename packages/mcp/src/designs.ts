@@ -1,4 +1,4 @@
-import { MAX_OPS, THEMES, compactDoc, parseDoc, variations, type Doc, type Form } from '@vectr/core';
+import { ELEMENTS, MAX_OPS, THEMES, compactDoc, elementDocForms, parseDoc, variations, type Doc, type Form } from '@vectr/core';
 
 /**
  * In-memory design sessions. Every mutation goes through `parseDoc`, so the store
@@ -34,9 +34,18 @@ export type OpPatch =
   | { action: 'move'; index: number; to: number };
 export type FormUpdate = Raw & { id: string; source_params?: Raw; ops?: Raw[]; ops_patch?: OpPatch[]; style?: Raw };
 
+/** One element to place: `size` multiplies the element (default 1); x, y default to the artboard centre. */
+export interface ElementPlacement {
+  id: string;
+  x?: number;
+  y?: number;
+  size?: number;
+}
+
 export interface DesignUpdate {
   set?: DocSettings;
   add_forms?: FormInput[];
+  add_elements?: ElementPlacement[];
   update_forms?: FormUpdate[];
   remove_form_ids?: string[];
   form_order?: string[];
@@ -45,6 +54,23 @@ export interface DesignUpdate {
 export class DesignError extends Error {}
 
 const isObj = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * The forms of an element for an artboard, as raw entries for a design's `forms` array.
+ * Core lays an element out on a square artboard and scales it by min(width, height) / 1000,
+ * so `size` is applied by laying it out for an artboard `size` times larger and then moving
+ * its centre from that artboard's middle to (x, y). Scale, offsets and label sizes all follow.
+ */
+function elementForms(p: ElementPlacement, width: number, height: number): Raw[] {
+  const el = ELEMENTS.find((e) => e.id === p.id);
+  if (!el) throw new DesignError(`Unknown element "${p.id}". Known: ${ELEMENTS.map((e) => e.id).join(', ')}.`);
+  const k = p.size ?? 1;
+  if (!Number.isFinite(k) || k <= 0) throw new DesignError(`Element size must be a positive number (got ${p.size}).`);
+  const [w, h] = [width * k, height * k];
+  const [dx, dy] = [(p.x ?? width / 2) - w / 2, (p.y ?? height / 2) - h / 2];
+  return elementDocForms(el, w, h).map((f) => ({ ...f, x: round2((f.x as number) + dx), y: round2((f.y as number) + dy) }));
+}
 
 function applySettings(raw: Raw, set: DocSettings, warnings: string[]) {
   if (set.theme !== undefined) {
@@ -131,12 +157,15 @@ export class DesignStore {
     return { design, warnings };
   }
 
-  update(id: string, u: DesignUpdate): { design: Design; warnings: string[] } {
+  update(id: string, u: DesignUpdate): { design: Design; warnings: string[]; placed: { element: string; formIds: string[] }[] } {
     const design = this.get(id);
     const warnings: string[] = [];
+    const placed: { element: string; formIds: string[] }[] = [];
     const raw = structuredClone(design.doc) as unknown as Raw & { forms: Raw[] };
 
     if (u.set) applySettings(raw, u.set, warnings);
+    // Resolved up front, against the artboard as `set` leaves it, so an unknown id fails the call before any id is spent.
+    const elements = (u.add_elements ?? []).map((e) => ({ id: e.id, forms: elementForms(e, raw.width as number, raw.height as number) }));
 
     for (const fid of u.remove_form_ids ?? []) {
       const i = raw.forms.findIndex((f) => f.id === fid);
@@ -169,6 +198,15 @@ export class DesignStore {
 
     for (const f of u.add_forms ?? []) raw.forms.push({ ...f, id: this.nextFormId(id) });
 
+    for (const e of elements) {
+      const formIds = e.forms.map((f) => {
+        const fid = this.nextFormId(id);
+        raw.forms.push({ ...f, id: fid });
+        return fid;
+      });
+      placed.push({ element: e.id, formIds });
+    }
+
     if (u.form_order) {
       const ids = raw.forms.map((f) => f.id as string);
       const order = u.form_order;
@@ -181,7 +219,7 @@ export class DesignStore {
     design.doc = parsed.doc;
     design.updatedAt = Date.now();
     this.candidates.clear();
-    return { design, warnings: [...warnings, ...parsed.warnings] };
+    return { design, warnings: [...warnings, ...parsed.warnings], placed };
   }
 
   /** Generate variations of one form; they are kept so `applyVariation` can pick one. */

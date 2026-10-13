@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { MAX_OPS, RECIPES, THEMES, decodeDoc, describeBlocks, docToSVG, serializeDoc, shareURL, type Doc } from '@vectr/core';
+import { ELEMENTS, MAX_OPS, RECIPES, STYLE_PARAMS, THEMES, decodeDoc, describeBlocks, docToSVG, serializeDoc, shareURL, type Doc } from '@vectr/core';
 import { z } from 'zod';
 import { DesignError, DesignStore, type Design } from './designs.js';
 import { FileAccessError, Files } from './files.js';
@@ -8,7 +8,7 @@ import { BLOCK_KINDS, OP_KINDS, SOURCE_KINDS, blocksMarkdown, summarize, warning
 import { renderPNG } from './preview.js';
 
 export const SERVER_NAME = 'vectr-mcp-server';
-export const SERVER_VERSION = '0.2.0';
+export const SERVER_VERSION = '0.3.0';
 
 /** Inline SVG/JSON above this size must be written to a file instead. */
 export const CHARACTER_LIMIT = 60_000;
@@ -19,16 +19,27 @@ export interface ServerConfig {
   appUrl: string;
 }
 
-const INSTRUCTIONS = `Vectr composes generative vector art. Each form is a source (curve, lattice, points or note) run through a stack of operators (revolve, sweep, repeat, mirror, warp, jitter, connect, tile, scatter, resample), then styled: line weight and colour ramp by depth, fading hidden lines, ribbon fills and markers.
+const oneOf = (xs: readonly string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs.join(''));
+const ELEMENT_IDS = ELEMENTS.map((e) => e.id) as [string, ...string[]];
+
+const INSTRUCTIONS = `Vectr composes generative vector art. Each form is a source (${oneOf(SOURCE_KINDS)}) run through a stack of operators (${OP_KINDS.join(', ')}), then styled: line weight and colour ramp by depth, fading hidden lines, solid, dotted or dashed lines, ribbon or closed-shape fills (which can knock out what is behind), markers and labels.
 
 Workflow:
-1. vectr_list_building_blocks once to learn sources, operators and their params.
+1. vectr_list_building_blocks once to learn sources, operators, elements and their params.
 2. vectr_create_design, blank or from a recipe, JSON, share link or project file. It returns a design_id and a preview image.
-3. vectr_update_design to add or change forms and their operator stacks. Every call returns a fresh preview; look at it and iterate.
+3. vectr_update_design to add or change forms and their operator stacks, or to drop in ready-made elements with add_elements. Every call returns a fresh preview; look at it and iterate.
 4. vectr_mutate_design to explore variations of a form, then apply the one you like.
 5. vectr_export_design to deliver. "link" opens the design in the Vectr app for the user to keep editing; "svg", "png" and "json" write files.
 
-Tips: a circle or arc revolved makes a sphere or torus (use revolve.offset); a wave repeated in depth with fill "ribbons" makes strata; points connected with k-nearest make constellations. Place forms with x,y (artboard px) and size them with scale (radius in px). Invalid values are clamped or dropped and listed under "Corrections" rather than failing; read them and fix your input.`;
+Tips:
+- A circle or arc revolved makes a sphere or torus (use revolve.offset); a wave repeated in depth with fill "ribbons" makes strata; points connected with k-nearest make constellations.
+- Beaded globe: curve arc (start -90, sweep 180) → revolve → resample (mode dots, keepLines true), style markers "dot".
+- Dials and rulers: a circle or line → ticks (majorEvery for long marks, vary "wave" for rhythm), flat (rx 0, ry 0, perspective 0).
+- Use the orbits source for orbital shells and gimbals, and the card source for captions (multi-line text that wraps to the card).
+- Cards: ALWAYS keep them flat (rx 0, ry 0, perspective 0), set style fill "shapes" with knockout true to hide the lines behind, and labelFont "sans". labelColor sets the colour of text and card icons.
+- Line weight is per form, so layer several forms for hierarchy: a thick limb or bezel with a hairline grid, graduations or dotted rings on top.
+- Elements (${ELEMENT_IDS.join(', ')}) are ready-made multi-form pieces: add_elements: [{ "id": "dial", "x": 400, "y": 450, "size": 0.6 }] places one scaled to the artboard (size multiplies it, default 1; centred unless x, y are given). Then refine its forms with update_forms.
+- Place forms with x,y (artboard px) and size them with scale (radius in px). Invalid values are clamped or dropped and listed under "Corrections" rather than failing; read them and fix your input.`;
 
 const text = (t: string) => ({ type: 'text' as const, text: t });
 const image = (png: Buffer) => ({ type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' });
@@ -54,24 +65,36 @@ const ResponseFormat = z.enum(['markdown', 'json']).default('markdown').describe
 const PreviewWidth = z.number().int().min(128).max(2000).default(640).describe('Preview PNG width in pixels (default 640)');
 const Params = z.record(z.string(), z.union([z.number(), z.boolean(), z.string()]));
 
+/** The values of a select style option, straight from the engine, so a new option is never rejected here. */
+function styleOptions(key: string): [string, ...string[]] {
+  const def = STYLE_PARAMS.find((p) => p.key === key);
+  if (def?.kind !== 'select') throw new Error(`Style option "${key}" is not a select`);
+  return def.options.map((o) => o.value) as [string, ...string[]];
+}
+const styleEnum = (key: string) => z.enum(styleOptions(key));
+
 const StyleInput = z
   .object({
-    width: z.number().optional().describe('Line weight in px'),
-    taper: z.enum(['none', 'depth', 't']).optional().describe('Thin and lighten lines with depth, or along each line'),
+    width: z.number().optional().describe('Line weight in px. One weight per form: layer forms for thick and thin'),
+    dash: styleEnum('dash').optional().describe('Line pattern on lines facing you: solid, dotted or dashed'),
+    taper: styleEnum('taper').optional().describe('Thin and lighten lines with depth, or along each line'),
     taperAmount: z.number().optional().describe('0–1'),
-    color: z.enum(['ramp', 'solid']).optional(),
-    colorBy: z.enum(['depth', 't', 'family']).optional().describe('What the ramp follows: depth, position along each line, or copy/ring index'),
+    color: styleEnum('color').optional(),
+    colorBy: styleEnum('colorBy').optional().describe('What the ramp follows: depth, position along each line, or copy/ring index'),
     stroke: z.string().nullable().optional().describe('Solid colour (hex) when color is "solid"; null = first ramp stop'),
     ramp: z.array(z.string()).nullable().optional().describe('This form\'s own ramp (hex stops); null = document ramp'),
-    hidden: z.enum(['fade', 'dotted', 'dashed', 'solid', 'hide']).optional().describe('How lines facing away are drawn'),
-    fill: z.enum(['none', 'ribbons']).optional().describe('Translucent bands between neighbouring lines'),
+    hidden: styleEnum('hidden').optional().describe('How lines facing away are drawn'),
+    fill: styleEnum('fill').optional().describe('"ribbons": translucent bands between neighbouring lines. "shapes": fills closed shapes (circles, cards)'),
     fillOpacity: z.number().optional(),
-    markers: z.enum(['none', 'dot', 'ring', 'cross', 'tick']).optional(),
+    knockout: z.boolean().optional().describe('With a fill: paint the background under it so forms beneath are hidden'),
+    markers: styleEnum('markers').optional(),
     markerSize: z.number().optional(),
     markerEvery: z.number().optional(),
     markersByDepth: z.boolean().optional(),
     labels: z.boolean().optional(),
     labelSize: z.number().optional(),
+    labelFont: styleEnum('labelFont').optional().describe('Label typeface: mono, sans or serif'),
+    labelColor: z.string().nullable().optional().describe('Colour (hex) of labels and card icons; null = colour of the nearest lines'),
     opacity: z.number().optional(),
   })
   .loose();
@@ -101,6 +124,15 @@ const FormInput = z
     ...transformFields,
   })
   .loose();
+
+const ElementInput = z
+  .object({
+    id: z.enum(ELEMENT_IDS).describe('Which element (see vectr_list_building_blocks)'),
+    x: z.number().optional().describe('Centre x in artboard px (default: centre)'),
+    y: z.number().optional().describe('Centre y in artboard px (default: centre)'),
+    size: z.number().min(0.05).max(10).optional().describe('Multiplier on the element\'s size, spacing and label size (default 1; 0.5 = half)'),
+  })
+  .strict();
 
 const OpPatch = z.discriminatedUnion('action', [
   z.object({ action: z.literal('add'), kind: z.enum(OP_KINDS), params: Params.optional(), index: z.number().int().optional().describe('Insert position (default: end)') }),
@@ -150,7 +182,7 @@ export function createServer(config: ServerConfig) {
     'vectr_list_building_blocks',
     {
       title: 'List Vectr building blocks',
-      description: `Describe the sources, operators and style options (every param with its range and default), plus themes and recipes.
+      description: `Describe the sources, operators and style options (every param with its range and default), plus themes, recipes and elements (ready-made multi-form pieces for vectr_update_design → add_elements).
 
 Call this once before designing. Pass "block" to see one source or operator (or "style").
 Params marked "only when" apply only for certain values of another param (e.g. curve "turns" only for shape "spiral").`,
@@ -224,14 +256,18 @@ Choose at most one source (omit all for a blank canvas):
   3. update_forms: only fields you pass change. source_params and style merge; "ops" replaces the stack; "ops_patch" edits it
      ({ "action": "add", "kind": "warp", "params": {…} } | { "action": "update", "index": 0, "params": {…} } | { "action": "remove", "index": 1 } | { "action": "move", "index": 2, "to": 0 })
   4. add_forms: new forms on top (ids F1, F2… in order). Each needs source.kind
-  5. form_order: every form id, bottom → top
+  5. add_elements: ready-made multi-form pieces (${ELEMENT_IDS.join(', ')}) on top of those, with the next ids in order. Each is { "id", "x"?, "y"?, "size"? }:
+     centred on the artboard unless x, y are given, scaled to the artboard, and "size" multiplies it (default 1). The reply lists the ids it created; refine them with update_forms
+  6. form_order: every form id, bottom → top
 
 Example: { "design_id": "d1", "add_forms": [{ "source": { "kind": "points", "params": { "count": 120 } }, "ops": [{ "kind": "connect", "params": { "k": 3, "bow": 0.5 } }], "style": { "markers": "dot" } }],
+           "add_elements": [{ "id": "dial", "x": 300, "y": 450, "size": 0.5 }],
            "update_forms": [{ "id": "F1", "ops_patch": [{ "action": "add", "kind": "warp", "params": { "kind": "twist", "amount": 0.8 } }] }] }`,
       inputSchema: {
         design_id: z.string(),
         set: DocSettings.optional(),
         add_forms: z.array(FormInput).max(50).optional(),
+        add_elements: z.array(ElementInput).max(20).optional().describe('Ready-made pieces to place on top (each adds several forms)'),
         update_forms: z.array(FormUpdate).max(200).optional(),
         remove_form_ids: z.array(z.string()).max(200).optional(),
         form_order: z.array(z.string()).max(200).optional(),
@@ -242,8 +278,11 @@ Example: { "design_id": "d1", "add_forms": [{ "source": { "kind": "points", "par
     },
     (a) =>
       guard(() => {
-        const { design, warnings } = store.update(a.design_id, a);
-        return designReply(design, warnings, `Updated design \`${design.id}\`.`, a.preview, a.preview_width);
+        const { design, warnings, placed } = store.update(a.design_id, a);
+        const added = placed.map((p) => `${p.element} (${p.formIds.length > 1 ? `${p.formIds[0]}–${p.formIds[p.formIds.length - 1]}` : p.formIds[0]})`);
+        const lead = `Updated design \`${design.id}\`.${added.length ? ` Added elements: ${added.join(', ')}.` : ''}`;
+        const r = designReply(design, warnings, lead, a.preview, a.preview_width);
+        return { ...r, structuredContent: { ...r.structuredContent, ...(placed.length ? { placed } : {}) } };
       }),
   );
 
@@ -305,7 +344,7 @@ With "apply": n, the n-th variation from the last call replaces the form. Any ot
     {
       title: 'Get a Vectr design',
       description: `Describe a design: artboard settings and every form with its id, source, operator stack (with indexes for ops_patch) and non-default style.
-response_format "json" returns the compact design JSON (defaults omitted), which can be passed back to vectr_create_design.`,
+Long text (a card's caption) is shortened in the summary. response_format "json" returns the compact design JSON (defaults omitted, text whole), which can be passed back to vectr_create_design.`,
       inputSchema: { design_id: z.string(), response_format: ResponseFormat },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
