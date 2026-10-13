@@ -23,8 +23,11 @@ function dash(hidden: HiddenStyle, width: number): string {
   return '';
 }
 
-/** Markup for one form (a `<g>`), from an already-projected render. */
-export function formToSVG(form: Form, r: RenderedForm): string {
+/**
+ * Markup for one form (a `<g>`), from an already-projected render. `paper` is the
+ * document background, painted under knockout fills; thumbnails omit it.
+ */
+export function formToSVG(form: Form, r: RenderedForm, _paper?: string): string {
   const st = form.style;
   const out: string[] = [`<g opacity="${n(st.opacity)}">`];
   for (const fl of r.fills) {
@@ -66,7 +69,7 @@ export function roughFilterSVG(rough: number): string {
 export function docToSVG(doc: Doc, rendered?: Map<string, RenderedForm>): string {
   const body = doc.forms
     .filter((f) => f.visible)
-    .map((f) => formToSVG(f, rendered?.get(f.id) ?? renderForm(f, doc.ramp)))
+    .map((f) => formToSVG(f, rendered?.get(f.id) ?? renderForm(f, doc.ramp), doc.background))
     .join('');
   const filter = doc.rough > 0 ? ` filter="url(#${ROUGH_FILTER_ID})"` : '';
   return (
