@@ -253,6 +253,39 @@ describe('elements', () => {
     for (const f of forms) expect(f).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
   });
 
+  it('ships the strip field: flat rows of solid hyphenated slabs, the relevant ones in the accent', () => {
+    const element = ELEMENTS.find((e) => e.id === 'strip-field')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'strip', params: { mode: 'generate', rows: 14 } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp' });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(new Set(g.nodes.map((n) => n.p[1])).size).toBe(14);
+    expect(g.nodes.some((n) => n.family === 1) && g.nodes.some((n) => n.family === 0)).toBe(true);
+    // Both families show up as fills, and the document ramp supplies the colours.
+    const r = renderForm(form, DOC.ramp);
+    expect(r.fills.map((f) => f.color)).toEqual([DOC.ramp[0], DOC.ramp[2]]);
+  });
+
+  it('ships the linked mark: one solid bar of two slabs on a neck, its finish cut on a slant', () => {
+    const element = ELEMENTS.find((e) => e.id === 'linked-mark')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'strip', params: { mode: 'pattern', ramp: 30, finishEnd: 'slant', slant: 18 } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1 });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(g.lines).toHaveLength(1);
+    expect(g.nodes).toHaveLength(2);
+    // The bottom-right corner reaches further right than the top-right one.
+    const pts = g.lines[0].pts;
+    const [top, bottom] = [Math.max(...pts.map((p) => p[1])), Math.min(...pts.map((p) => p[1]))];
+    const right = (y: number) => Math.max(...pts.filter((p) => Math.abs(p[1] - y) < 0.02 * (top - bottom)).map((p) => p[0]));
+    expect(right(bottom)).toBeGreaterThan(right(top));
+    expect(renderForm(form, DOC.ramp).fills).toHaveLength(1);
+  });
+
   it('keeps every card flat, in elements and in recipes', () => {
     const cards = [
       ...ELEMENTS.flatMap((e) => e.forms.filter((f) => f.source.kind === 'card').map((f) => ({ ...DEFAULT_CARD_VIEW, ...f.transform }))),

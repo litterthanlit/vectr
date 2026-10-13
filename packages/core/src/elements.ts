@@ -271,6 +271,34 @@ export const ELEMENTS: Element[] = [
       })),
     ],
   },
+  {
+    id: 'strip-field',
+    name: 'Strip field',
+    blurb: 'Rows of hyphenated slabs joined by necks and broken by gaps, like context read as ribbons, the few relevant slabs picked out by colour',
+    forms: [{
+      name: 'Strip field',
+      source: { kind: 'strip', params: { mode: 'generate', rows: 14, segments: 6, relevant: 0.12, seed: 8, aspect: 1, height: 0.68 } },
+      style: { ...hair, width: 0.5, colorBy: 'family', fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 420, ...flat },
+    }],
+  },
+  {
+    id: 'linked-mark',
+    name: 'Linked mark',
+    blurb: 'A bold mark of two slabs joined by a thin neck: a vertical step on top, a 30° ramp below, and the second slab cut on a slant',
+    forms: [{
+      name: 'Linked mark',
+      source: {
+        kind: 'strip',
+        params: {
+          mode: 'pattern', pattern: '####--######', height: 0.7, neck: 0.5, neckAlign: 'center', ramp: 30, rampEdge: 'bottom', corner: 0.08,
+          startEnd: 'square', finishEnd: 'slant', slant: 18, aspect: 1.6,
+        },
+      },
+      style: { ...hair, width: 0.8, fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 330, ...flat },
+    }],
+  },
 ];
 
 /** The artboard-relative scale for a document: elements grow and shrink with its shorter side. */
