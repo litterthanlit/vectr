@@ -183,6 +183,34 @@ describe('design lifecycle', () => {
     expect(json).toContain(caption);
   });
 
+  it('teaches the context source and focus mode, and takes a long pasted text whole, with a preview', async () => {
+    const tips = client.getInstructions()!;
+    expect(tips).toMatch(/context source makes a field of token blocks/);
+    expect(tips).toMatch(/fill "shapes"/);
+    expect(tips).toMatch(/connect mode "focus"/);
+    expect(textOf(await call('vectr_list_building_blocks', { block: 'context' }))).toMatch(/^### context — Context/);
+    expect(textOf(await call('vectr_list_building_blocks', { block: 'connect' }))).toMatch(/`fy` \(Focus Y\): -3–3, default 1.2 _\(only when mode is focus\)_/);
+
+    const long = Array.from({ length: 560 }, (_, i) => `word${i % 9}`).join(' ');
+    expect(long.length).toBeGreaterThan(3000);
+    expect(long.length).toBeLessThan(4000);
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [{
+          source: { kind: 'context', params: { text: long, highlight: 'word3', layout: 'burst' } },
+          ops: [{ kind: 'connect', params: { mode: 'focus', split: true, which: 'relevant', fy: 1.4 } }],
+          style: { fill: 'shapes', colorBy: 'family' },
+        }],
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const f = design(r).forms[0] as { source: { params: Record<string, unknown> }; ops: { params: Record<string, unknown> }[] };
+    expect(f.source.params.text).toBe(long);
+    expect(f.ops[0].params).toMatchObject({ mode: 'focus', split: true, which: 'relevant', fy: 1.4 });
+  });
+
   it('mutates a form and applies the chosen variation', async () => {
     await call('vectr_create_design', { recipe: 'pulse-bloom', preview: false });
     const before = JSON.stringify(design(await call('vectr_get_design', { design_id: 'd1' })));

@@ -36,6 +36,7 @@ Tips:
 - Beaded globe: curve arc (start -90, sweep 180) → revolve → resample (mode dots, keepLines true), style markers "dot".
 - Dials and rulers: a circle or line → ticks (majorEvery for long marks, vary "wave" for rhythm), flat (rx 0, ry 0, perspective 0).
 - Use the orbits source for orbital shells and gimbals, and the card source for captions (multi-line text that wraps to the card).
+- Context (what an agent sees): the context source makes a field of token blocks, from pasted text (each word a block, highlight words relevant) or generated (layout window, burst or radial). Blocks need style fill "shapes"; colorBy "family" with a 2-stop ramp, grey then an accent, lights up the relevant tokens. Attention is connect mode "focus" (threads from the tokens to fx, fy, fz; split gives fans above and below, which "relevant" threads only the relevant tokens). Tilt with ry and perspective for a stream.
 - Cards: ALWAYS keep them flat (rx 0, ry 0, perspective 0), set style fill "shapes" with knockout true to hide the lines behind, and labelFont "sans". labelColor sets the colour of text and card icons.
 - Line weight is per form, so layer several forms for hierarchy: a thick limb or bezel with a hairline grid, graduations or dotted rings on top.
 - Elements (${ELEMENT_IDS.join(', ')}) are ready-made multi-form pieces: add_elements: [{ "id": "dial", "x": 400, "y": 450, "size": 0.6 }] places one scaled to the artboard (size multiplies it, default 1; centred unless x, y are given). Then refine its forms with update_forms.
