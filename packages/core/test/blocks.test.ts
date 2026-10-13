@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OPERATORS, SOURCES, buildForm, createForm, opFor, parseDoc, variations } from '../src/index.js';
+import { DEFAULT_STYLE, OPERATORS, POINT_BUDGET, SOURCES, buildForm, createForm, describeBlocks, opFor, parseDoc, renderForm, variations } from '../src/index.js';
 import type { Form, GeoLabel, Geometry, Params, Polyline, Vec3 } from '../src/index.js';
 
 const at = { x: 0, y: 0 };
@@ -15,7 +15,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 describe('registration', () => {
   it('lists the new blocks in order', () => {
-    expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card']);
+    expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card', 'context']);
     expect(OPERATORS[OPERATORS.length - 1].kind).toBe('ticks');
   });
 });
@@ -470,5 +470,346 @@ describe('resample keepLines', () => {
     const dashes = stack({ kind: 'curve' }, [{ kind: 'resample', params: { mode: 'dashes', keepLines: true } }]);
     expect(dashes.lines.length).toBeGreaterThan(1);
     expect(dashes.lines.every((l) => l.pts.length === 3)).toBe(true);
+  });
+});
+
+describe('context', () => {
+  const LAYOUTS = ['window', 'burst', 'radial'];
+  const context = (params: Record<string, unknown> = {}, ops: { kind: string; params?: Record<string, unknown> }[] = []) =>
+    stack({ kind: 'context', params }, ops);
+  const centre = (l: Polyline): Vec3 => [l.pts.reduce((a, q) => a + q[0], 0) / l.pts.length, l.pts.reduce((a, q) => a + q[1], 0) / l.pts.length, l.pts[0][2]];
+  const PARAGRAPH = 'The model reads every token in its window. Attention, though, is not spread evenly: a few passages matter most! Retrieval puts them there; context decides.';
+  const words = (t: string) => t.split(/\s+/).filter(Boolean);
+
+  it.each(LAYOUTS)('%s keeps generated tokens within the budget, and fills most of it', (layout) => {
+    for (const tokens of [20, 150, 600, 3000]) {
+      const g = context({ layout, tokens, rows: 40, density: 1, falloff: 0 });
+      expect(g.nodes.length).toBeGreaterThan(0);
+      expect(g.nodes.length).toBeLessThanOrEqual(tokens);
+      expect(g.lines).toHaveLength(g.nodes.length);
+    }
+    expect(context({ layout, tokens: 3000, rows: 100, density: 1, falloff: 0 }).nodes.length).toBeGreaterThan(1500);
+    // The most that can be asked for still fits the pipeline's point budget untouched.
+    const heavy = buildForm(make({ kind: 'context', params: { layout, tokens: 3000, rows: 160, density: 1, falloff: 0 } }));
+    expect(heavy.warnings).toEqual([]);
+    expect(heavy.geometry.lines.length * 4 + heavy.geometry.nodes.length).toBeLessThan(POINT_BUDGET);
+  });
+
+  it('draws a block as a closed four-point rectangle with a node at its centre, and nothing that can be hidden', () => {
+    for (const layout of LAYOUTS) {
+      const g = context({ layout });
+      for (const [i, l] of g.lines.entries()) {
+        expect(l.closed).toBe(true);
+        expect(l.pts).toHaveLength(4);
+        expect(l.normals).toBeUndefined();
+        expect(l.t).toHaveLength(4);
+        expect(new Set(l.t).size).toBe(1);
+        expect([0, 1]).toContain(l.family);
+        expect(g.nodes[i].t).toBe(l.t![0]);
+        expect(g.nodes[i].family).toBe(l.family);
+        const c = centre(l);
+        g.nodes[i].p.forEach((v, k) => expect(v).toBeCloseTo(c[k], 9));
+        // A rectangle: opposite sides are equal and the corners are square.
+        const [a, b, c2, d] = l.pts;
+        expect(len(sub(a, b))).toBeCloseTo(len(sub(d, c2)), 9);
+        expect(dot(sub(b, a), sub(d, a))).toBeCloseTo(0, 9);
+      }
+    }
+  });
+
+  it('draws a line as a two-point bar, and a dot as only a node', () => {
+    const blocks = context({ mark: 'block' });
+    const bars = context({ mark: 'line' });
+    expect(bars.nodes).toEqual(blocks.nodes);
+    expect(bars.lines).toHaveLength(blocks.lines.length);
+    bars.lines.forEach((l, i) => {
+      expect(l.pts).toHaveLength(2);
+      expect(l.closed).toBeFalsy();
+      expect(l.t).toHaveLength(2);
+      expect(l.family).toBe(blocks.lines[i].family);
+      // The bar runs along the block's length, through its centre.
+      const [a, b] = blocks.lines[i].pts;
+      expect(len(sub(l.pts[1], l.pts[0]))).toBeCloseTo(len(sub(b, a)), 9);
+    });
+    const dots = context({ mark: 'dot' });
+    expect(dots.lines).toEqual([]);
+    expect(dots.nodes).toEqual(blocks.nodes);
+  });
+
+  it('numbers tokens in reading order with t from 0 to 1', () => {
+    for (const layout of LAYOUTS) {
+      const g = context({ layout });
+      const ts = g.nodes.map((n) => n.t!);
+      expect(ts[0]).toBe(0);
+      expect(ts[ts.length - 1]).toBe(1);
+      for (let i = 1; i < ts.length; i++) expect(ts[i]).toBeGreaterThan(ts[i - 1]);
+    }
+    // In a window that is row by row, top to bottom, left to right.
+    const w = context({ layout: 'window' }).nodes;
+    for (let i = 1; i < w.length; i++) expect(w[i].p[1] < w[i - 1].p[1] - 1e-9 || (Math.abs(w[i].p[1] - w[i - 1].p[1]) < 1e-9 && w[i].p[0] > w[i - 1].p[0])).toBe(true);
+    expect(buildForm(make({ kind: 'context', params: { text: 'one' } })).geometry.nodes[0].t).toBe(0);
+  });
+
+  it('spans a field whose shape follows aspect, like the lattice', () => {
+    for (const aspect of [0.25, 1, 1.6, 4]) {
+      const ax = Math.sqrt(aspect), ay = 1 / ax;
+      for (const layout of ['window', 'burst']) {
+        const pts = context({ layout, aspect, density: 1, falloff: 0, tokens: 1500 }).lines.flatMap((l) => l.pts);
+        expect(Math.max(...pts.map((q) => q[0]))).toBeGreaterThan(ax * 0.9);
+        expect(Math.min(...pts.map((q) => q[0]))).toBeGreaterThanOrEqual(-ax - 1e-9);
+        expect(Math.max(...pts.map((q) => q[0]))).toBeLessThanOrEqual(ax + 1e-9);
+        expect(Math.max(...pts.map((q) => Math.abs(q[1])))).toBeLessThanOrEqual(ay + 1e-9);
+        expect(Math.max(...pts.map((q) => Math.abs(q[1])))).toBeGreaterThan(ay * 0.9);
+      }
+    }
+  });
+
+  it('is left-aligned and flat in a window, with ragged right edges and gaps between paragraphs', () => {
+    const g = context({ layout: 'window', rows: 40, tokens: 700 });
+    expect(g.lines.every((l) => l.pts.every((q) => q[2] === 0))).toBe(true);
+    const rows = new Map<string, Vec3[]>();
+    for (const n of g.nodes) rows.set(n.p[1].toFixed(6), [...(rows.get(n.p[1].toFixed(6)) ?? []), n.p]);
+    expect(rows.size).toBeGreaterThan(20);
+    // Every row starts at the left edge...
+    for (const r of rows.values()) expect(Math.min(...r.map((q) => q[0]))).toBeLessThan(-1 + 0.3);
+    // ...and ends in different places.
+    expect(new Set([...rows.values()].map((r) => Math.round(Math.max(...r.map((q) => q[0])) * 20))).size).toBeGreaterThan(4);
+    // Fewer than all rows are used: paragraph breaks leave blank lines.
+    expect(rows.size).toBeLessThan(40);
+  });
+
+  it('gives burst and radial a small seeded depth per row, and every token of a row the same one', () => {
+    for (const layout of ['burst', 'radial']) {
+      const g = context({ layout, tokens: 1200 });
+      const zs = g.lines.map((l) => l.pts[0][2]);
+      expect(zs.every((z) => Math.abs(z) <= 0.05 + 1e-9)).toBe(true);
+      expect(new Set(zs.map((z) => z.toFixed(6))).size).toBeGreaterThan(5);
+      expect(g.lines.every((l) => l.pts.every((q) => q[2] === l.pts[0][2]))).toBe(true);
+    }
+  });
+
+  it('respects the relevant share for a given seed, as family 1', () => {
+    const share = (params: Record<string, unknown>) => {
+      const g = context({ layout: 'window', tokens: 3000, rows: 100, density: 1, ...params });
+      return g.nodes.filter((n) => n.family === 1).length / g.nodes.length;
+    };
+    expect(share({ relevant: 0 })).toBe(0);
+    expect(share({ relevant: 1 })).toBe(1);
+    for (const relevant of [0.08, 0.3]) for (const seed of [1, 2, 3]) expect(Math.abs(share({ relevant, seed }) - relevant)).toBeLessThan(0.03);
+  });
+
+  it('is denser, and its blocks longer, near the core of a burst than at its edge', () => {
+    const g = context({ layout: 'burst', tokens: 2400, rows: 100, density: 0.8, falloff: 0.6 });
+    const r = (p: Vec3) => Math.hypot(p[0], p[1]);
+    const inside = g.nodes.filter((n) => r(n.p) < 0.4), outside = g.nodes.filter((n) => r(n.p) > 0.75);
+    // Per unit area, the core holds several times more tokens than the rim (the field is the square [-1, 1]²).
+    const [coreArea, rimArea] = [Math.PI * 0.4 ** 2, 4 - Math.PI * 0.75 ** 2];
+    expect(inside.length / coreArea).toBeGreaterThan(4 * (outside.length / rimArea));
+    const length = (n: (typeof g.nodes)[number]) => {
+      const l = g.lines[g.nodes.indexOf(n)];
+      return len(sub(l.pts[1], l.pts[0]));
+    };
+    const mean = (xs: number[]) => xs.reduce((a, x) => a + x, 0) / xs.length;
+    expect(mean(inside.map(length))).toBeGreaterThan(1.5 * mean(outside.map(length)));
+  });
+
+  it('thins faster with a higher falloff', () => {
+    const spread = (falloff: number) => {
+      const g = context({ layout: 'burst', tokens: 2400, rows: 100, density: 1, falloff });
+      return g.nodes.filter((n) => Math.hypot(n.p[0], n.p[1]) > 0.7).length / g.nodes.length;
+    };
+    expect(spread(0.9)).toBeLessThan(spread(0.5));
+    expect(spread(0.5)).toBeLessThan(spread(0.1));
+  });
+
+  it('puts radial tokens on rays from the centre, oriented along them, thinning outward', () => {
+    const g = context({ layout: 'radial', tokens: 1500, rows: 60, falloff: 0.5 });
+    expect(g.lines.length).toBeGreaterThan(200);
+    for (const l of g.lines) {
+      const c = centre(l);
+      const along = sub(l.pts[1], l.pts[0]);
+      const radial = [c[0], c[1], 0] as Vec3;
+      // The block's long side points away from the centre (or at it).
+      expect(Math.abs(dot(along, radial)) / (len(along) * len(radial))).toBeGreaterThan(0.999);
+    }
+    const r = (p: Vec3) => Math.hypot(p[0], p[1]);
+    const disc = (x: number) => Math.PI * x * x;
+    const near = g.nodes.filter((n) => r(n.p) < 0.4).length / disc(0.4), far = g.nodes.filter((n) => r(n.p) > 0.8).length / (disc(1) - disc(0.8));
+    expect(near).toBeGreaterThan(3 * far);
+  });
+
+  it('leaves positions alone when relevance, or block height, changes', () => {
+    for (const layout of LAYOUTS) {
+      const a = context({ layout, relevant: 0.1 }), b = context({ layout, relevant: 0.5 });
+      expect(b.nodes.map((n) => n.p)).toEqual(a.nodes.map((n) => n.p));
+      expect(b.nodes.map((n) => n.family)).not.toEqual(a.nodes.map((n) => n.family));
+      expect(context({ layout, height: 0.9 }).nodes.map((n) => n.p)).toEqual(context({ layout }).nodes.map((n) => n.p));
+    }
+  });
+
+  it('is deterministic per seed and differs across seeds', () => {
+    for (const layout of LAYOUTS) {
+      expect(context({ layout, seed: 3 })).toEqual(context({ layout, seed: 3 }));
+      expect(context({ layout, seed: 3 })).not.toEqual(context({ layout, seed: 4 }));
+    }
+  });
+
+  describe('pasted text', () => {
+    const text = (params: Record<string, unknown> = {}, source = PARAGRAPH) => context({ text: source, relevant: 0, ...params });
+
+    it('makes one token per word, in reading order, with lengths that follow the word', () => {
+      const g = text();
+      expect(g.nodes).toHaveLength(words(PARAGRAPH).length);
+      expect(g.lines).toHaveLength(g.nodes.length);
+      const block = (i: number) => len(sub(g.lines[i].pts[1], g.lines[i].pts[0]));
+      const w = words(PARAGRAPH);
+      // Same character count, same length; more characters, longer.
+      const unit = block(w.findIndex((x) => x === 'every')) / 'every'.length;
+      w.forEach((word, i) => expect(block(i)).toBeCloseTo(unit * [...word].length, 6));
+      expect(g.nodes[0].t).toBe(0);
+      expect(g.nodes[g.nodes.length - 1].t).toBe(1);
+    });
+
+    it('wraps to the field width and fits its height, starting at the top', () => {
+      const long = PARAGRAPH.repeat(6);
+      for (const aspect of [0.5, 1, 2]) {
+        const ax = Math.sqrt(aspect), ay = 1 / ax;
+        const g = text({ aspect }, long);
+        expect(g.nodes).toHaveLength(words(long).length);
+        const pts = g.lines.flatMap((l) => l.pts);
+        expect(Math.min(...pts.map((q) => q[0]))).toBeGreaterThanOrEqual(-ax - 1e-9);
+        expect(Math.max(...pts.map((q) => q[0]))).toBeLessThanOrEqual(ax + 1e-9);
+        expect(Math.max(...pts.map((q) => q[1]))).toBeLessThanOrEqual(ay + 1e-9);
+        expect(Math.min(...pts.map((q) => q[1]))).toBeGreaterThanOrEqual(-ay - 1e-9);
+        expect(Math.max(...pts.map((q) => q[1]))).toBeGreaterThan(ay - 0.1);
+      }
+      // A longer text is set smaller, so it still fits.
+      const size = (source: string) => len(sub(text({}, source).lines[0].pts[1], text({}, source).lines[0].pts[0]));
+      expect(size('wide ' + PARAGRAPH.repeat(10))).toBeLessThan(size('wide ' + PARAGRAPH));
+    });
+
+    it('starts a new row at each line break and keeps one blank row for a paragraph break', () => {
+      const ys = (source: string) => [...new Set(text({}, source).nodes.map((n) => n.p[1]))].sort((a, b) => b - a);
+      expect(ys('a b c d')).toHaveLength(1);
+      expect(ys('a b\nc d')).toHaveLength(2);
+      const [y1, y2, y3] = ys('a b\nc d\n\ne f');
+      expect((y1 - y3) / (y1 - y2)).toBeCloseTo(3, 6); // one blank row between the last two
+      expect(ys('a b\n\n\n\nc d').map((y) => y - ys('a b\n\n\n\nc d')[0])).toEqual(ys('a b\n\nc d').map((y) => y - ys('a b\n\nc d')[0]));
+      // Leading and trailing blank lines leave no gap.
+      expect(text({}, '\n\nhello world\n\n').nodes.map((n) => n.p)).toEqual(text({}, 'hello world').nodes.map((n) => n.p));
+    });
+
+    it('marks highlighted words as family 1, whatever their case or punctuation', () => {
+      const g = text({ highlight: 'attention, DECIDES, window' });
+      const marked = new Set(['window.', 'Attention,', 'decides.']);
+      words(PARAGRAPH).forEach((w, i) => expect(g.nodes[i].family).toBe(marked.has(w) ? 1 : 0));
+      expect(g.nodes.filter((n) => n.family === 1)).toHaveLength(3);
+      // A highlight list overrides the relevant share, and a word matches whole (not as part of a longer one).
+      expect(text({ highlight: 'zzz', relevant: 1 }).nodes.every((n) => n.family === 0)).toBe(true);
+      expect(text({ highlight: 'the' }, 'the theme then the').nodes.map((n) => n.family)).toEqual([1, 0, 0, 1]);
+    });
+
+    it('falls back to the seeded relevant share when nothing is highlighted', () => {
+      const long = PARAGRAPH.repeat(40);
+      const share = (params: Record<string, unknown>) => {
+        const g = text(params, long);
+        return g.nodes.filter((n) => n.family === 1).length / g.nodes.length;
+      };
+      expect(share({ relevant: 0 })).toBe(0);
+      expect(share({ relevant: 1 })).toBe(1);
+      expect(Math.abs(share({ relevant: 0.25 }) - 0.25)).toBeLessThan(0.06);
+      expect(share({ relevant: 0.25, seed: 9 })).not.toBe(share({ relevant: 0.25, seed: 10 }));
+    });
+
+    it('is arranged by the layout too, keeping every highlighted word', () => {
+      const long = PARAGRAPH.repeat(5);
+      const flat = text({ highlight: 'attention' }, long);
+      for (const layout of ['burst', 'radial']) {
+        const g = text({ highlight: 'attention', layout, rows: 24 }, long);
+        expect(finite(g)).toBe(true);
+        expect(g.nodes.length).toBeGreaterThan(0);
+        expect(g.nodes.length).toBeLessThanOrEqual(flat.nodes.length);
+        expect(g.nodes.filter((n) => n.family === 1)).toHaveLength(flat.nodes.filter((n) => n.family === 1).length);
+        expect(g.nodes.map((n) => n.p)).not.toEqual(flat.nodes.map((n) => n.p));
+      }
+    });
+
+    it('ignores a text that is only whitespace, and caps the words', () => {
+      expect(text({}, '  \n \t ')).toEqual(context({ relevant: 0 }));
+      const many = Array.from({ length: 2000 }, () => 'a').join(' ');
+      for (const layout of LAYOUTS) {
+        const g = text({ layout }, many);
+        expect(g.nodes.length).toBeLessThanOrEqual(3000);
+        expect(g.nodes.length).toBeGreaterThan(500);
+        expect(finite(g)).toBe(true);
+      }
+    });
+  });
+
+  it('survives odd and extreme input', () => {
+    const odd = [
+      {}, { tokens: 0, rows: 0 }, { tokens: 1e9, rows: 1e9 }, { tokens: -5, rows: -5, aspect: -1 }, { aspect: 0, length: 0, height: 0, density: -1, falloff: 9 },
+      { aspect: 1e6, variance: 5 }, { text: 'x', rows: 0 }, { text: '‮\u0000 😀 \n\n é', length: 99 }, { text: 'supercalifragilisticexpialidocious'.repeat(8), aspect: 4 },
+      { tokens: Number.NaN, rows: Number.NaN, seed: Number.NaN }, { layout: 'nope', mark: 'nope' },
+    ];
+    for (const layout of LAYOUTS) for (const params of odd) {
+      const g = context({ layout, ...params });
+      expect(finite(g)).toBe(true);
+      expect(g.nodes.length).toBeLessThanOrEqual(3000);
+      for (const l of g.lines) expect(l.t!.every(Number.isFinite)).toBe(true);
+    }
+  });
+
+  it('renders as solid blocks with a shapes fill, and only outlines without', () => {
+    const form = make({ kind: 'context', params: { layout: 'burst' } });
+    const outlines = renderForm(form, ['#111', '#eee']);
+    expect(outlines.fills).toEqual([]);
+    expect(outlines.strokes.length).toBeGreaterThan(0);
+    const solid = renderForm({ ...form, style: { ...DEFAULT_STYLE, fill: 'shapes', fillOpacity: 1, colorBy: 'family' } }, ['#111', '#eee']);
+    // One closed sub-path per block, split into a bucket per family.
+    expect(solid.fills.length).toBe(2);
+    expect(solid.fills.reduce((n, f) => n + (f.d.match(/M/g)?.length ?? 0), 0)).toBeGreaterThan(buildForm(form).geometry.lines.length * 0.95);
+    expect(solid.fills.every((f) => f.opacity === 1)).toBe(true);
+    expect(solid.warnings).toEqual([]);
+  });
+
+  it('is varied by Mutate without touching its text', () => {
+    const base: Form = make({ kind: 'context', params: { text: PARAGRAPH, highlight: 'attention' } });
+    for (const v of variations(base, 12, 5, 1)) {
+      expect(v.source.params.text).toBe(PARAGRAPH);
+      expect(v.source.params.highlight).toBe('attention');
+      expect(finite(buildForm(v).geometry)).toBe(true);
+    }
+  });
+
+  it('describes its params to agents, with a 4000-character text and a layout-only falloff', () => {
+    const block = describeBlocks().sources.find((s) => s.kind === 'context')!;
+    const param = (key: string) => block.params.find((q) => q.key === key)!;
+    expect(param('text')).toMatchObject({ type: 'string', maxLength: 4000, multiline: true });
+    expect(param('highlight')).toMatchObject({ type: 'string', maxLength: 200 });
+    expect(param('layout')).toMatchObject({ type: 'enum', options: LAYOUTS });
+    expect(param('mark')).toMatchObject({ type: 'enum', options: ['block', 'line', 'dot'] });
+    expect(param('tokens')).toMatchObject({ min: 20, max: 3000, default: 600 });
+    expect(param('falloff')).toMatchObject({ only_when: { key: 'layout', in: ['burst', 'radial'] } });
+    expect(describeBlocks().sources.find((s) => s.kind === 'card')!.params.find((q) => q.key === 'text')).toMatchObject({ maxLength: 200 });
+  });
+
+  it('keeps 4000 characters of text through parseDoc, while other text still stops at 200', () => {
+    const long = 'word '.repeat(900);
+    const { doc, warnings } = parseDoc({
+      forms: [
+        { source: { kind: 'context', params: { text: long, highlight: long } } },
+        { source: { kind: 'card', params: { text: long, meta: long } } },
+        { source: { kind: 'note', params: { text: long } } },
+      ],
+    });
+    expect(warnings).toEqual([]);
+    const [ctx, card, note] = doc.forms.map((f) => f.source.params);
+    expect(String(ctx.text)).toHaveLength(4000);
+    expect(String(ctx.highlight)).toHaveLength(200);
+    expect(String(card.text)).toHaveLength(200);
+    expect(String(card.meta)).toHaveLength(200);
+    expect(String(note.text)).toHaveLength(200);
+    expect(buildForm(doc.forms[0]).geometry.nodes.length).toBe(words(long.slice(0, 4000)).length);
   });
 });
