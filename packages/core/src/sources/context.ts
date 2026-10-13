@@ -1,6 +1,7 @@
-import { TAU, clamp, int, lerp, num, smoothstep, str } from '../math.js';
+import { DEG, TAU, clamp, int, lerp, num, smoothstep, str } from '../math.js';
 import { cleanText } from '../render.js';
 import type { GeoNode, Polyline, SourceDef } from '../types.js';
+import { slab } from './shapes.js';
 import { highlightSet, isRelevant, rand } from './words.js';
 
 type Layout = 'window' | 'burst' | 'radial';
@@ -281,11 +282,17 @@ export const context: SourceDef = {
       options: [{ value: 'block', label: 'Block' }, { value: 'line', label: 'Line' }, { value: 'dot', label: 'Dot' }],
       help: 'Blocks need style fill "shapes" to be solid; dots need markers',
     },
+    {
+      key: 'cut', label: 'Block ends', kind: 'select', options: [{ value: 'square', label: 'Square' }, { value: 'slant', label: 'Slanted' }], when: { key: 'mark', in: ['block'] },
+      help: 'Slanted blocks end in a forward cut, the bottom corner reaching past the top',
+    },
+    { key: 'cutAngle', label: 'Slant', kind: 'range', min: 0, max: 60, step: 1, unit: '°', when: { key: 'cut', in: ['slant'] }, help: 'How far the cut leans from vertical' },
+    { key: 'corner', label: 'Corner', kind: 'range', min: 0, max: 0.5, step: 0.01, when: { key: 'mark', in: ['block'] }, help: 'Corner radius as a share of the block height' },
     { key: 'seed', label: 'Seed', kind: 'seed' },
   ],
   defaults: {
     text: '', layout: 'window', tokens: 600, rows: 48, aspect: 1, length: 1, variance: 0.6, height: 0.55,
-    density: 0.7, falloff: 0.6, relevant: 0.08, highlight: '', mark: 'block', seed: 7,
+    density: 0.7, falloff: 0.6, relevant: 0.08, highlight: '', mark: 'block', cut: 'square', cutAngle: 24, corner: 0, seed: 7,
   },
   build(p) {
     const layout = str(p, 'layout') as Layout;
@@ -323,6 +330,8 @@ export const context: SourceDef = {
     const words = text.trim() ? parseText(text, str(p, 'highlight'), f.relevant, seed) : [];
     const toks = words.length ? fromText(f, words, layout) : layout === 'burst' ? burstRows(f) : layout === 'radial' ? rays(f) : windowRows(f);
 
+    const lean = str(p, 'cut') === 'slant' ? Math.tan(v('cutAngle', 0, 80) * DEG) : 0;
+    const corner = v('corner', 0, 0.5);
     const lines: Polyline[] = [];
     const nodes: GeoNode[] = [];
     toks.forEach((tk, i) => {
@@ -330,8 +339,11 @@ export const context: SourceDef = {
       const [c, s] = [Math.cos(tk.ang), Math.sin(tk.ang)];
       const at = (u: number, w: number): [number, number, number] => [tk.x + u * c - w * s, tk.y + u * s + w * c, tk.z];
       const [hl, ht] = [tk.len / 2, tk.thick / 2];
-      if (mark === 'block') lines.push({ pts: [at(-hl, -ht), at(hl, -ht), at(hl, ht), at(-hl, ht)], closed: true, t: [t, t, t, t], family: tk.rel });
-      else if (mark === 'line') lines.push({ pts: [at(-hl, 0), at(hl, 0)], t: [t, t], family: tk.rel });
+      if (mark === 'block') {
+        // Rounded corners add a few points to each block, which 3000 blocks can still afford.
+        const poly = slab(-hl, hl, -ht, ht, { lean, finish: lean > 0, radius: corner * tk.thick, res: corner > 0 ? 2 : 0 });
+        lines.push({ pts: poly.map(([u, w]) => at(u, w)), closed: true, t: poly.map(() => t), family: tk.rel });
+      } else if (mark === 'line') lines.push({ pts: [at(-hl, 0), at(hl, 0)], t: [t, t], family: tk.rel });
       nodes.push({ p: [tk.x, tk.y, tk.z], t, family: tk.rel });
     });
     return { lines, nodes };

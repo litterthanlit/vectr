@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STYLE, OPERATORS, POINT_BUDGET, SOURCES, buildForm, createForm, describeBlocks, opFor, parseDoc, renderForm, variations } from '../src/index.js';
 import type { Form, GeoLabel, Geometry, Params, Polyline, Vec3 } from '../src/index.js';
+import { slab } from '../src/sources/shapes.js';
 
 const at = { x: 0, y: 0 };
 /** Build a stack with defaults filled in, the way the app and parser do. */
@@ -17,6 +18,55 @@ describe('registration', () => {
   it('lists the new blocks in order', () => {
     expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card', 'context', 'strip']);
     expect(OPERATORS[OPERATORS.length - 1].kind).toBe('ticks');
+  });
+});
+
+describe('slab', () => {
+  it('is a counter-clockwise rectangle from the bottom left, whichever way round the bounds are given', () => {
+    expect(slab(0, 4, 0, 1)).toEqual([[0, 0], [4, 0], [4, 1], [0, 1]]);
+    expect(slab(4, 0, 1, 0)).toEqual(slab(0, 4, 0, 1));
+  });
+
+  it('pulls the top corner of a slanted end in, so the bottom corner reaches past it', () => {
+    expect(slab(0, 4, 0, 1, { lean: 0.5, finish: true })).toEqual([[0, 0], [4, 0], [3.5, 1], [0, 1]]);
+    expect(slab(0, 4, 0, 1, { lean: 0.5, start: true })).toEqual([[0, 0], [4, 0], [4, 1], [0.5, 1]]);
+    expect(slab(0, 4, 0, 1, { lean: 0.5, start: true, finish: true })).toEqual([[0, 0], [4, 0], [3.5, 1], [0.5, 1]]);
+    expect(slab(0, 4, 0, 1, { lean: 0, finish: true })).toEqual(slab(0, 4, 0, 1));
+    expect(slab(0, 4, 0, 1, { lean: 0.5 })).toEqual(slab(0, 4, 0, 1));
+  });
+
+  it('takes at most 45% of the length for a slant, so a short block never folds over', () => {
+    const [, , c, d] = slab(0, 1, 0, 10, { lean: 5, start: true, finish: true });
+    expect(c[0]).toBeCloseTo(0.55, 12);
+    expect(d[0]).toBeCloseTo(0.45, 12);
+    expect(c[0]).toBeGreaterThan(d[0]);
+  });
+
+  it('rounds corners with an absolute radius, never wider than half the height or an edge', () => {
+    const r = slab(0, 10, 0, 2, { radius: 0.5, res: 4 });
+    expect(r.length).toBeGreaterThan(12);
+    for (const [x, y] of r) {
+      expect(x).toBeGreaterThanOrEqual(-1e-9);
+      expect(x).toBeLessThanOrEqual(10 + 1e-9);
+      expect(y).toBeGreaterThanOrEqual(-1e-9);
+      expect(y).toBeLessThanOrEqual(2 + 1e-9);
+    }
+    // The sharp corner (0, 0) is cut off, and the flat of the bottom edge starts at x = radius.
+    expect(r.some(([x, y]) => x === 0 && y === 0)).toBe(false);
+    expect(r.some(([x, y]) => Math.abs(x - 0.5) < 1e-9 && Math.abs(y) < 1e-9)).toBe(true);
+    // A radius bigger than the block is cut back to a semicircle's worth rather than overshooting.
+    for (const [x, y] of slab(0, 10, 0, 2, { radius: 99, res: 4 })) {
+      expect(x).toBeGreaterThanOrEqual(-1e-9);
+      expect(y).toBeGreaterThanOrEqual(-1e-9);
+      expect(y).toBeLessThanOrEqual(2 + 1e-9);
+    }
+    expect(slab(0, 10, 0, 2, { radius: 0.5, res: 0 })).toEqual(slab(0, 10, 0, 2));
+  });
+
+  it('never throws on empty or odd input', () => {
+    for (const args of [[0, 0, 0, 0], [1, 1, 0, 1], [0, 1, 1, 1], [NaN, 1, 0, 1], [0, Infinity, 0, 1]] as const) {
+      expect(() => slab(...args, { lean: 9, start: true, finish: true, radius: 1, res: 3 })).not.toThrow();
+    }
   });
 });
 
@@ -534,6 +584,89 @@ describe('context', () => {
     const dots = context({ mark: 'dot' });
     expect(dots.lines).toEqual([]);
     expect(dots.nodes).toEqual(blocks.nodes);
+  });
+
+  describe('cut', () => {
+    const sq = (params: Record<string, unknown> = {}) => context({ cut: 'square', ...params });
+    const slant = (params: Record<string, unknown> = {}) => context({ cut: 'slant', ...params });
+
+    it('square is the default, and leaves the plain rectangles untouched', () => {
+      expect(context()).toEqual(context({ cut: 'square' }));
+      expect(context({ cut: 'square', cutAngle: 50 })).toEqual(context());
+      expect(context().lines.every((l) => l.pts.length === 4)).toBe(true);
+    });
+
+    it.each(LAYOUTS)('%s: slanted blocks end in a forward cut, the bottom corner reaching past the top', (layout) => {
+      const flat = sq({ layout }), cut = slant({ layout, cutAngle: 30 });
+      expect(cut.lines).toHaveLength(flat.lines.length);
+      expect(cut.nodes).toEqual(flat.nodes);
+      cut.lines.forEach((l, i) => {
+        // The same four corners, with only the top finish corner (the fourth-from-start one) pulled back along the block.
+        const [a, b, c, d] = flat.lines[i].pts, [a2, b2, c2, d2] = l.pts;
+        expect(l.pts).toHaveLength(4);
+        expect(l.closed).toBe(true);
+        expect([a2, b2, d2]).toEqual([a, b, d]);
+        const along = sub(b, a), length = len(along);
+        const pulled = sub(c, c2);
+        // c2 sits on the top edge, pulled toward the start by thick × tan(30°), unless the block is too short.
+        const thick = len(sub(d, a));
+        const expected = Math.min(thick * Math.tan(Math.PI / 6), 0.45 * length);
+        expect(len(pulled)).toBeCloseTo(expected, 9);
+        expect(dot(pulled, along) / (len(pulled) * length || 1)).toBeCloseTo(1, 6);
+        // So the bottom edge is longer than the top.
+        expect(len(sub(b2, a2))).toBeGreaterThan(len(sub(c2, d2)) - 1e-12);
+      });
+    });
+
+    it('angle 0 is square, and a steeper angle bites deeper', () => {
+      expect(slant({ cutAngle: 0 }).lines).toEqual(sq().lines);
+      const bite = (angle: number) => slant({ layout: 'window', cutAngle: angle, tokens: 40, rows: 8 }).lines.reduce((s, l) => s + len(sub(l.pts[1], l.pts[2])), 0);
+      expect(bite(10)).toBeLessThan(bite(30));
+      expect(bite(30)).toBeLessThan(bite(60));
+    });
+
+    it('never folds a short block over itself', () => {
+      for (const params of [{ cutAngle: 60, length: 0.2, variance: 1, height: 1 }, { cutAngle: 60, tokens: 3000, rows: 160, length: 0.2 }]) {
+        for (const l of slant(params).lines) {
+          const [a, b, c, d] = l.pts;
+          // Top edge keeps its direction: the top finish corner stays right of the top start corner.
+          expect(dot(sub(c, d), sub(b, a))).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('is cut the same way in pasted text, and does not touch lines, dots or nodes', () => {
+      const words = { text: PARAGRAPH, highlight: 'model', cut: 'slant' };
+      const g = context(words), flat = context({ ...words, cut: 'square' });
+      expect(g.lines).toHaveLength(flat.lines.length);
+      expect(g.nodes).toEqual(flat.nodes);
+      expect(g.lines.some((l, i) => len(sub(l.pts[2], flat.lines[i].pts[2])) > 1e-6)).toBe(true);
+      for (const mark of ['line', 'dot']) expect(slant({ mark })).toEqual(sq({ mark }));
+    });
+
+    it('stays finite and within the point budget at its heaviest', () => {
+      const heavy = buildForm(make({ kind: 'context', params: { layout: 'burst', tokens: 3000, rows: 160, density: 1, falloff: 0, cut: 'slant', cutAngle: 60, corner: 0.5 } }));
+      expect(heavy.warnings).toEqual([]);
+      expect(finite(heavy.geometry)).toBe(true);
+    });
+
+    it('rounds corners with the corner param, as a share of the block height', () => {
+      const round = context({ layout: 'window', corner: 0.3, tokens: 60, rows: 12 });
+      const sharp = context({ layout: 'window', corner: 0, tokens: 60, rows: 12 });
+      expect(round.lines).toHaveLength(sharp.lines.length);
+      for (const [i, l] of round.lines.entries()) {
+        expect(l.pts.length).toBeGreaterThan(4);
+        expect(l.t).toHaveLength(l.pts.length);
+        // Rounding stays inside the sharp block.
+        const [a, , c] = sharp.lines[i].pts;
+        for (const q of l.pts) {
+          expect(q[0]).toBeGreaterThanOrEqual(a[0] - 1e-9);
+          expect(q[0]).toBeLessThanOrEqual(c[0] + 1e-9);
+          expect(q[1]).toBeGreaterThanOrEqual(a[1] - 1e-9);
+          expect(q[1]).toBeLessThanOrEqual(c[1] + 1e-9);
+        }
+      }
+    });
   });
 
   it('numbers tokens in reading order with t from 0 to 1', () => {
