@@ -211,6 +211,35 @@ describe('design lifecycle', () => {
     expect(f.ops[0].params).toMatchObject({ mode: 'focus', split: true, which: 'relevant', fy: 1.4 });
   });
 
+  it('teaches the strip source, lists its params, and takes a long text and a pattern whole, with a preview', async () => {
+    const tips = client.getInstructions()!;
+    expect(tips).toMatch(/strip source draws rows of slabs joined by thinner necks/);
+    expect(tips).toMatch(/'#' slab, '-' neck/);
+    expect(tips).toMatch(/colorBy "family" with a 2-stop ramp/);
+    expect(tips).toMatch(/connect mode "focus" with which "relevant"/);
+    const listing = textOf(await call('vectr_list_building_blocks', { block: 'strip' }));
+    expect(listing).toMatch(/^### strip — Strip/);
+    expect(listing).toMatch(/`ramp` \(Ramp\)/);
+    expect(listing).toMatch(/`pattern` \(Pattern\)[^\n]*only when mode is pattern/);
+
+    const long = Array.from({ length: 560 }, (_, i) => `word${i % 9}`).join(' ');
+    const pattern = '####--######\n#####-####\n###  #######';
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [
+          { source: { kind: 'strip', params: { mode: 'text', text: long, highlight: 'word3' } }, style: { fill: 'shapes', colorBy: 'family' } },
+          { source: { kind: 'strip', params: { pattern, finishEnd: 'round', ramp: 45 } }, style: { fill: 'shapes' } },
+        ],
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const [a, b] = design(r).forms as { source: { params: Record<string, unknown> } }[];
+    expect(a.source.params.text).toBe(long);
+    expect(b.source.params).toMatchObject({ pattern, finishEnd: 'round', ramp: 45 });
+  });
+
   it('mutates a form and applies the chosen variation', async () => {
     await call('vectr_create_design', { recipe: 'pulse-bloom', preview: false });
     const before = JSON.stringify(design(await call('vectr_get_design', { design_id: 'd1' })));

@@ -14,8 +14,8 @@ Every form is a small pipeline:
 ```
 source                →  operators, applied top to bottom          →  style
 curve · lattice ·        revolve · sweep · repeat · mirror · warp      weight and colour follow depth,
-points · note ·          jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
-orbits · card · context  ticks                                         markers, labels
+points · note · orbits   jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
+card · context · strip   ticks                                         markers, labels
 ```
 
 A circle revolved with an offset is a torus; add a twist warp and it corkscrews. A wave
@@ -24,7 +24,7 @@ nearest neighbours, become a constellation. An arc revolved and resampled into b
 a globe; a circle with ticks is a dial. None of these are built in as fixed shapes;
 they come from combining blocks.
 
-- **7 sources, 11 operators**, each with its own settings, reorderable and toggleable.
+- **8 sources, 11 operators**, each with its own settings, reorderable and toggleable.
   `orbits` lays rings on a shell at many tilts (orbits, gimbals, atoms), `card` is a
   caption panel with a frame, an icon and word-wrapped text, `ticks` hatches every line
   (dials, rulers, combs) with long marks every Nth tick, and `resample` in dots mode can
@@ -35,6 +35,12 @@ they come from combining blocks.
   what was retrieved. `connect` mode "To a point" runs threads from the tokens to a chosen
   focus, which is attention: `split` fans them above and below. The Context window and
   Attention elements are ready-made.
+- **Strips**: the `strip` source draws hyphenated ribbons: slabs joined by thinner necks,
+  with a step or a ramp where they meet and square, slanted or round ends. Type a pattern
+  (`#` a slab, `-` a neck, a space a gap), generate rows, or paste text and each word
+  becomes a slab. Closed outlines fill solid; relevant slabs get their own outline in
+  family 1, so a two-stop ramp by family picks them out, and `connect` mode "To a point"
+  can thread from them. The Strip field and Linked mark elements are ready-made.
 - **A signature style**: lines thin and lighten with depth, colour runs along an OKLab
   ramp (by depth, along the line, or per copy), back faces fade, optional ribbon fills
   between neighbouring lines and markers on points. Classic dotted or dashed hidden
@@ -117,7 +123,7 @@ npm run build
 
 ```
 packages/core/src/
-  sources/      curve (15 shapes), lattice, points, note, orbits, card, context → polylines with t / family / band
+  sources/      curve (15 shapes), lattice, points, note, orbits, card, context, strip → polylines with t / family / band
   operators/    pure (geometry, params) → geometry functions, each with a param schema
   pipeline.ts   source → enabled ops, cached, with a point budget so any stack stays fast
   render.ts     project, split visible/hidden, bucket segments by depth and colour
