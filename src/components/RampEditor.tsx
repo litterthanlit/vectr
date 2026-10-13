@@ -50,7 +50,8 @@ export function RampEditor({ label, stops, onChange, hint }: { label: string; st
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-1" role="group" aria-label="Ramp presets">
+      {/* One column per theme, so the presets stay on a single row however many themes there are. */}
+      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${THEMES.length}, minmax(0, 1fr))` }} role="group" aria-label="Ramp presets">
         {THEMES.map((t) => (
           <button
             key={t.id}
@@ -58,7 +59,7 @@ export function RampEditor({ label, stops, onChange, hint }: { label: string; st
             title={`${t.name} ramp`}
             aria-label={`Use the ${t.name} ramp`}
             onClick={() => onChange([...t.ramp])}
-            className="h-3 w-9 rounded-full ring-1 ring-white/10 transition hover:scale-110"
+            className="h-3 w-full rounded-full ring-1 ring-white/10 transition hover:scale-110"
             style={{ background: rampCSS(t.ramp) }}
           />
         ))}

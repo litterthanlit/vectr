@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Lock, Trash2, Unlock } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
-import { ELEMENTS, RECIPES, SOURCES, createForm, docToSVG, formToSVG, placeElement, renderForm, type FormSpec, type Params, type Style } from '@vectr/core';
+import { ELEMENTS, ELEMENT_ARTBOARD, RECIPES, SOURCES, createForm, docToSVG, formToSVG, placeElement, renderForm, type FormSpec, type Params, type Style } from '@vectr/core';
 import { useStore } from '../store';
 import { IconButton } from './controls';
 
@@ -35,6 +35,10 @@ export const SOURCE_STARTERS: Record<string, FormSpec> = {
 const starterFor = (kind: string): FormSpec => SOURCE_STARTERS[kind] ?? { source: { kind } };
 
 const THUMB_RAMP = ['#52525b', '#a1a1aa', '#fafafa'];
+/** The 100×100 box every tile draws into, which is what a finish's filter is cut to. */
+const THUMB_VIEW = { x: 0, y: 0, w: 100, h: 100 };
+/** The smallest finish scale a tile draws: a tenth of an artboard-sized finish is under a pixel on screen. */
+const FINISH_FLOOR = 0.3;
 
 /**
  * Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit;
@@ -84,12 +88,21 @@ const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
 const ElementThumb = memo(function ElementThumb({ id }: { id: string }) {
   const html = useMemo(() => {
     const element = ELEMENTS.find((e) => e.id === id)!;
+    // placeElement shrinks a finish with the element (finishScale × 0.1 here), so its bleed and speckle keep their proportions;
+    // the view keeps the finish's filter on the tile.
     return placeElement(element, 100, 100)
       .map((form) => {
         const st = form.style;
         // Caption text is tiny at this scale; nudge it up so a card tile still suggests lines of text.
-        form.style = { ...st, width: 0.5 + st.width * 0.28, markerSize: Math.max(0.7, st.markerSize * 0.4), labelSize: st.labelSize * 1.25 };
-        return formToSVG(form, renderForm(form, THUMB_RAMP));
+        const legible = { width: 0.5 + st.width * 0.28, markerSize: Math.max(0.7, st.markerSize * 0.4), labelSize: st.labelSize * 1.25 };
+        // A finished form is a mass of ink, not a line drawing, so it keeps near its true proportions: outlines and dots thick
+        // enough to read would only fatten it. A tile is about 70 px wide, so the finish itself must not drop below roughly a
+        // pixel of bleed or it stops fusing anything.
+        const k = 100 / ELEMENT_ARTBOARD;
+        form.style = st.finish === 'clean'
+          ? { ...st, ...legible }
+          : { ...st, ...legible, width: 0.3, markerSize: Math.max(1.2, st.markerSize * k), finishScale: Math.max(st.finishScale, FINISH_FLOOR) };
+        return formToSVG(form, renderForm(form, THUMB_RAMP), undefined, THUMB_VIEW);
       })
       .join('');
   }, [id]);
