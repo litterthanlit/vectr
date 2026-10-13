@@ -18,6 +18,8 @@ export interface Polyline {
   family?: number;
   /** Lines sharing a band, adjacent in order and equal in length, get ribbon fills between them. */
   band?: number;
+  /** Drawn in the form's label colour, untapered and above the other strokes (card icons, glyphs). */
+  ink?: boolean;
 }
 
 export interface GeoNode {

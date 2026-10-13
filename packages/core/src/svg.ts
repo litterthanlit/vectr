@@ -46,7 +46,7 @@ export function formToSVG(form: Form, r: RenderedForm, paper?: string): string {
   const hiddenPattern = st.hidden === 'dotted' || st.hidden === 'dashed' ? st.hidden : st.dash;
   for (const s of r.strokes) {
     out.push(
-      `<path d="${s.d}" fill="none" stroke="${esc(s.color)}" stroke-width="${n(s.width)}" stroke-opacity="${n(s.opacity)}" stroke-linecap="round" stroke-linejoin="round"${dash(s.hidden ? hiddenPattern : st.dash, s.width)}/>`,
+      `<path d="${s.d}" fill="none" stroke="${esc(s.color)}" stroke-width="${n(s.width)}" stroke-opacity="${n(s.opacity)}" stroke-linecap="round" stroke-linejoin="round"${dash(s.ink ? 'solid' : s.hidden ? hiddenPattern : st.dash, s.width)}/>`,
     );
   }
   for (const a of r.arrows) out.push(`<path d="${a.d}" fill="${esc(a.color)}" stroke="${esc(a.color)}" stroke-width="${n(st.width * 0.5)}" stroke-linejoin="round"/>`);

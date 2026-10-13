@@ -88,7 +88,7 @@ export const card: SourceDef = {
       const cx = -w / 2 + pad + s / 2, cy = h / 2 - pad - s / 2;
       for (const stroke of strokes) {
         const pts = stroke.map(([x, y]): Vec3 => [cx + (x * s) / 2, cy + (y * s) / 2, 0]);
-        lines.push({ pts, closed: false, tone: 'front', family: 1, t: pts.map((_, i) => i / Math.max(1, pts.length - 1)) });
+        lines.push({ pts, closed: false, tone: 'front', family: 1, ink: true, t: pts.map((_, i) => i / Math.max(1, pts.length - 1)) });
       }
     }
 

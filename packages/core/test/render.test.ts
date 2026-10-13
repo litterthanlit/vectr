@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COLOR_LEVELS, LABEL_FONT, LABEL_FONTS, SOURCES, cleanText, compactDoc, createForm, decodeDoc, describeBlocks, docToSVG, encodeDoc,
+  COLOR_LEVELS, LABEL_FONT, LABEL_FONTS, SOURCES, buildForm, cleanText, compactDoc, createForm, decodeDoc, describeBlocks, docToSVG, encodeDoc,
   formToSVG, parseDoc, renderForm, sampleRamp, serializeDoc, textWidth, wrapText,
 } from '../src/index.js';
 import type { Form, Geometry, GeoLabel, Polyline, Style } from '../src/index.js';
@@ -371,6 +371,62 @@ describe('label colour', () => {
     expect(renderForm(note({ color: 'solid' }, bare), ['#336699', '#ffffff']).labelColor).toBe('#336699');
     expect(renderForm(note({ color: 'ramp' }, bare), ['#336699', '#778899']).labelColor).toBe('#778899');
     expect(renderForm(note({ color: 'ramp', ramp: ['#010203', '#040506'] }, bare), ['#336699', '#778899']).labelColor).toBe('#040506');
+  });
+});
+
+describe('ink lines', () => {
+  const inked = (style: Partial<Style> = {}) =>
+    probe({ lines: [sq(-1, -1, 1, { family: 0 }), { pts: [[0.2, 0.2, 0], [1, 0.8, 0]], family: 1, ink: true }], labels: [] }, { color: 'solid', stroke: '#336699', taper: 'none', width: 2, ...style });
+
+  it('go into one trailing bucket in the label colour, as wide as the form, never hidden', () => {
+    const r = renderForm(inked(), RAMP);
+    const ink = r.strokes.filter((s) => s.ink);
+    expect(ink).toHaveLength(1);
+    expect(r.strokes[r.strokes.length - 1]).toBe(ink[0]);
+    expect(ink[0]).toMatchObject({ color: r.labelColor, width: 2, opacity: 1, hidden: false });
+    expect(ink[0].d).toBe('M520 480L600 420');
+    // The ordinary line is still there, in the stroke colour, and not part of the ink bucket.
+    expect(r.strokes.filter((s) => !s.ink).map((s) => s.color)).toEqual(['#336699']);
+  });
+
+  it('take a set labelColor, which is worked out from the ordinary strokes otherwise', () => {
+    expect(renderForm(inked({ labelColor: '#abcdef' }), RAMP).strokes.at(-1)).toMatchObject({ ink: true, color: '#abcdef' });
+    const plain = renderForm(inked(), RAMP);
+    expect(plain.labelColor).toBe('#336699');
+    // Ink alone does not set the label colour: it falls back like a form with no lines.
+    const only = renderForm(probe({ lines: [{ pts: [[0, 0, 0], [1, 0, 0]], ink: true }] }, { color: 'solid', stroke: '#336699' }), RAMP);
+    expect(only.strokes).toHaveLength(1);
+    expect(only.strokes[0]).toMatchObject({ ink: true, color: '#336699' });
+  });
+
+  it('stay untapered, solid and opaque however the form is styled', () => {
+    const f = inked({ taper: 'depth', taperAmount: 1, dash: 'dotted', color: 'ramp', opacity: 0.5, hidden: 'hide' });
+    const r = renderForm(f, RAMP);
+    const ink = r.strokes.at(-1)!;
+    expect(ink).toMatchObject({ ink: true, width: 2, opacity: 1, hidden: false });
+    const svg = formToSVG(f, r);
+    const tails = strokeTails(svg);
+    expect(tails.at(-1)).toBe('');
+    expect(tails.slice(0, -1).every((t) => DOTS.test(t))).toBe(true);
+  });
+
+  it('are kept by operators that copy lines', () => {
+    const r = renderForm(mk({ kind: 'card', params: { icon: 'dial' } }, { color: 'solid', stroke: '#336699' }, [{ kind: 'ticks', params: { count: 8 } }], { rx: 0, ry: 0 }), RAMP);
+    expect(r.strokes.filter((s) => s.ink)).toHaveLength(1);
+  });
+
+  it('draw every card icon in the label colour', () => {
+    for (const icon of ['globe', 'orbit', 'dial', 'crosshair', 'spiral']) {
+      const g = buildForm(mk({ kind: 'card', params: { icon } })).geometry;
+      const glyph = g.lines.filter((l) => l.family === 1);
+      expect(glyph.length).toBeGreaterThan(0);
+      expect(glyph.every((l) => l.ink)).toBe(true);
+      expect(g.lines.filter((l) => l.closed).every((l) => !l.ink)).toBe(true);
+      const f = mk({ kind: 'card', params: { icon } }, { color: 'solid', stroke: '#c8c8cc', labelColor: '#111113' }, [], { rx: 0, ry: 0, scale: 100 });
+      const r = renderForm(f, RAMP);
+      expect(r.strokes.at(-1)).toMatchObject({ ink: true, color: '#111113' });
+      expect(r.strokes.filter((s) => !s.ink).every((s) => s.color === '#c8c8cc')).toBe(true);
+    }
   });
 });
 

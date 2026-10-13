@@ -10,6 +10,8 @@ export interface StrokeBucket {
   opacity: number;
   /** Drawn in the form's hidden-line style (dots/dashes). */
   hidden: boolean;
+  /** The one bucket of ink lines: label colour, untapered, always solid and on top. */
+  ink?: boolean;
 }
 export interface FillBucket {
   d: string;
@@ -237,10 +239,19 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
 
   // Pass 2: strokes.
   const strokeBuckets = new Map<string, { d: string[]; hidden: boolean; wq: number; cq: number }>();
+  const inkPath: string[] = [];
   const arrows: { d: string; color: string }[] = [];
   for (const { line, s, z, back } of lines) {
     const n = s.length;
     if (n < 2) continue;
+    if (line.ink) {
+      // Ink is a single flat bucket (colour is settled once the other strokes are known), so it skips depth styling.
+      for (let k = 0, count = line.closed ? n : n - 1; k < count; k++) {
+        const a = s[k], b = s[(k + 1) % n];
+        inkPath.push(`M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}`);
+      }
+      continue;
+    }
     const count = line.closed ? n : n - 1;
     const tv = (i: number) => (line.t ? line.t[i % n] : i / Math.max(1, n - 1));
     const fam = line.family ?? 0;
@@ -423,7 +434,9 @@ export function renderForm(form: Form, docRamp: string[], extraRy = 0): Rendered
   }
 
   if (!Number.isFinite(minX)) minX = maxX = form.x, minY = maxY = form.y;
+  // Ink takes the label colour, so work that out from the ordinary strokes before adding the ink bucket.
   const labelColor = st.labelColor ?? strokes[strokes.length - 1]?.color ?? (st.color === 'solid' ? solid : stops[stops.length - 1] ?? solid);
+  if (inkPath.length) strokes.push({ d: inkPath.join(''), width: st.width, color: labelColor, opacity: 1, hidden: false, ink: true });
   return {
     id: form.id, strokes, fills, markers, arrows, labels, labelColor,
     bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, warnings,
