@@ -14,25 +14,41 @@ Every form is a small pipeline:
 ```
 source            →  operators, applied top to bottom          →  style
 curve · lattice      revolve · sweep · repeat · mirror · warp      weight and colour follow depth,
-points · note        jitter · connect · tile · scatter · resample  hidden faces fade, ribbons, markers
+points · note        jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
+orbits · card        ticks                                         markers, labels
 ```
 
 A circle revolved with an offset is a torus; add a twist warp and it corkscrews. A wave
 repeated in depth with ribbon fills becomes strata. Points on a sphere, linked to their
-nearest neighbours, become a constellation. None of these are built in as fixed shapes;
+nearest neighbours, become a constellation. An arc revolved and resampled into beads is
+a globe; a circle with ticks is a dial. None of these are built in as fixed shapes;
 they come from combining blocks.
 
-- **4 sources, 10 operators**, each with its own settings, reorderable and toggleable.
+- **6 sources, 11 operators**, each with its own settings, reorderable and toggleable.
+  `orbits` lays rings on a shell at many tilts (orbits, gimbals, atoms), `card` is a
+  caption panel with a frame, an icon and word-wrapped text, `ticks` hatches every line
+  (dials, rulers, combs) with long marks every Nth tick, and `resample` in dots mode can
+  keep its lines to string beads on them.
 - **A signature style**: lines thin and lighten with depth, colour runs along an OKLab
   ramp (by depth, along the line, or per copy), back faces fade, optional ribbon fills
   between neighbouring lines and markers on points. Classic dotted or dashed hidden
   lines are still one setting away.
+  - Lines can be solid, dotted or dashed (`dash`).
+  - `fill` can paint closed shapes as well as ribbons, and `knockout` paints the
+    background under the fill so forms beneath it are hidden.
+  - Labels have a typeface (`labelFont`: mono, sans or serif), an optional colour
+    (`labelColor`, which also colours card icons) and can run over several lines.
 - **Mutate**: press `M` to see six variations of the selected form, click one to adopt
   it, and keep evolving. Subtle, medium or wild.
-- **Recipes**: eight starting points (Pulse bloom, Strata, Constellation, Tidal field,
-  Coil garden, Vessel, Meander, Loom knot), all built from the same blocks.
-- **Themes**: Graphite, Signal, Kiln, Ozone, Bloom. Each is a background plus a colour
-  ramp, and the interface accent follows it.
+- **Elements**: ready-made pieces in the left panel (Globe, Dial, Orbit shell, Ruler,
+  Caption, Gimbal, Gauge, Reticle, Contour). A form has a single line weight, so each
+  element is several forms placed together, such as a heavy bezel over fine graduations.
+  They scale with the artboard, name no colours and follow whatever theme is active.
+- **Recipes**: twelve starting points (Pulse bloom, Strata, Constellation, Tidal field,
+  Coil garden, Vessel, Meander, Loom knot, and the instrument plates Meridian,
+  Gyroscope, Orrery and Sonar), all built from the same blocks.
+- **Themes**: Graphite, Signal, Kiln, Ozone, Bloom, Fog. Each is a background plus a
+  colour ramp, and the interface accent follows it.
 - **Export and share**: SVG, SVG to clipboard, 2× PNG, project JSON, or a share link that
   holds the whole design in the URL. Vectr v1 files and links are converted on open.
 - Undo and redo, autosave, spin animation, keyboard shortcuts, responsive layout.
@@ -60,7 +76,8 @@ they come from combining blocks.
 Claude Code in this repo; `.mcp.json` registers it. Ask for something like *"a slow
 constellation on a sphere over rippled terrain, ozone theme"* and Claude will compose
 the stacks, check the previews, try a few mutations, and give you a link that opens the
-result in the [live app](https://vectr-eight.vercel.app). See
+result in the [live app](https://vectr-eight.vercel.app). It can also place the same
+ready-made elements as the app (`add_elements`). See
 [packages/mcp/README.md](packages/mcp/README.md) for setup and the tool list.
 
 ### Library and CLI
@@ -94,13 +111,15 @@ npm run build
 
 ```
 packages/core/src/
-  sources/      curve (15 shapes), lattice, points, note → polylines with t / family / band
+  sources/      curve (15 shapes), lattice, points, note, orbits, card → polylines with t / family / band
   operators/    pure (geometry, params) → geometry functions, each with a param schema
   pipeline.ts   source → enabled ops, cached, with a point budget so any stack stays fast
   render.ts     project, split visible/hidden, bucket segments by depth and colour
   svg.ts        buckets → SVG (the canvas and every export use this)
   schema.ts     validate and normalise untrusted designs; migrate.ts converts v1
   mutate.ts     seeded variations of a form
+  elements.ts   ready-made multi-form pieces, placed for any artboard size
+  recipes.ts    starting designs; themes.ts holds the backgrounds and ramps
   share.ts      share links (compact JSON → deflate → base64url)
 packages/mcp/   MCP server for agents
 src/            the React app: canvas, pipeline inspector, Mutate, store (undo + autosave)
