@@ -63,7 +63,7 @@ export type ParamDef = (
   | { key: string; label: string; kind: 'range'; min: number; max: number; step: number; unit?: string }
   | { key: string; label: string; kind: 'toggle' }
   | { key: string; label: string; kind: 'select'; options: { value: string; label: string }[] }
-  | { key: string; label: string; kind: 'text'; placeholder?: string; multiline?: boolean }
+  | { key: string; label: string; kind: 'text'; placeholder?: string; multiline?: boolean; maxLength?: number }
   | { key: string; label: string; kind: 'seed' }
 ) & { when?: ParamWhen; help?: string };
 

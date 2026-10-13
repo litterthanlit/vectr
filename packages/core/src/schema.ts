@@ -57,7 +57,7 @@ function sanitizeParam(def: ParamDef, v: unknown, fallback: Params[string], warn
       warn(`"${def.key}" must be one of: ${def.options.map((o) => o.value).join(', ')}`);
       return fallback;
     case 'text':
-      return typeof v === 'string' ? cleanText(v).slice(0, LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
+      return typeof v === 'string' ? cleanText(v).slice(0, def.maxLength ?? LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
   }
 }
 
@@ -309,7 +309,7 @@ export function describeBlocks() {
         case 'select':
           return { ...base, type: 'enum', options: d.options.map((o) => o.value) };
         case 'text':
-          return { ...base, type: 'string', maxLength: LIMITS.maxText, ...(d.multiline ? { multiline: true } : {}) };
+          return { ...base, type: 'string', maxLength: d.maxLength ?? LIMITS.maxText, ...(d.multiline ? { multiline: true } : {}) };
       }
     });
   return {
