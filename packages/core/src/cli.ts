@@ -1,0 +1,78 @@
+#!/usr/bin/env node
+import { readFileSync, writeFileSync } from 'node:fs';
+import { RECIPES, THEMES, compactDoc, describeBlocks, docToSVG, parseDoc, serializeDoc, shareURL } from './index.js';
+
+const HELP = `vectr — generative vector shapes from the command line
+
+Usage
+  vectr render <design.json | ->  [-o out.svg]    Render a design to SVG (stdout by default)
+  vectr check  <design.json | ->                  Validate a design; prints the normalised JSON
+  vectr link   <design.json | ->  [--base URL]    Print a share link that opens the design in the app
+  vectr recipe <id>                               Print a starter design (${RECIPES.map((t) => t.id).join(', ')})
+  vectr blocks                                    Print every source, operator and style option as JSON
+
+A design is JSON. Each form is a source plus a stack of operators; only source.kind is required:
+  { "theme": "ozone", "width": 1000, "height": 1000,
+    "forms": [{ "source": { "kind": "curve", "params": { "shape": "circle" } },
+                "ops": [{ "kind": "revolve", "params": { "rings": 12 } }, { "kind": "warp", "params": { "kind": "twist" } }],
+                "rx": -20, "style": { "colorBy": "t" } }] }
+Vectr v1 designs are converted automatically.
+Themes: ${THEMES.map((t) => t.id).join(', ')}
+
+Warnings about corrected or ignored fields go to stderr. Exit code 1 on unusable input.`;
+
+function read(src: string | undefined): string {
+  if (!src) throw new Error('Missing design file (use - for stdin)');
+  return readFileSync(src === '-' ? 0 : src, 'utf8');
+}
+
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+async function main(argv: string[]) {
+  const [cmd, ...args] = argv;
+  const load = () => {
+    const { doc, warnings } = parseDoc(read(args[0]));
+    for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
+    return doc;
+  };
+  switch (cmd) {
+    case 'render': {
+      const svg = docToSVG(load());
+      const out = flag(args, '-o');
+      if (out) writeFileSync(out, svg);
+      else process.stdout.write(svg + '\n');
+      return;
+    }
+    case 'check':
+      process.stdout.write(serializeDoc(load()) + '\n');
+      return;
+    case 'link':
+      process.stdout.write((await shareURL(load(), flag(args, '--base') ?? 'https://vectr-eight.vercel.app/')) + '\n');
+      return;
+    case 'recipe': {
+      const t = RECIPES.find((x) => x.id === args[0]);
+      if (!t) throw new Error(`Unknown recipe. Choose from: ${RECIPES.map((x) => x.id).join(', ')}`);
+      process.stdout.write(JSON.stringify(compactDoc(t.build()), null, 2) + '\n');
+      return;
+    }
+    case 'blocks':
+      process.stdout.write(JSON.stringify(describeBlocks(), null, 2) + '\n');
+      return;
+    case undefined:
+    case '-h':
+    case '--help':
+    case 'help':
+      process.stdout.write(HELP + '\n');
+      return;
+    default:
+      throw new Error(`Unknown command "${cmd}". Run "vectr help".`);
+  }
+}
+
+main(process.argv.slice(2)).catch((e: unknown) => {
+  process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.exit(1);
+});

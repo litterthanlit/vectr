@@ -1,14 +1,4 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { ArtboardContent } from '../components/Artboard';
-import { renderLayer } from './render';
-import type { Doc } from './types';
-
-export function docToSVG(doc: Doc): string {
-  const rendered = new Map(doc.layers.map((l) => [l.id, renderLayer(l)]));
-  const body = renderToStaticMarkup(createElement(ArtboardContent, { doc, rendered }));
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${doc.width}" height="${doc.height}" viewBox="0 0 ${doc.width} ${doc.height}">${body}</svg>`;
-}
+import { docToSVG, serializeDoc, shareURL, type Doc } from '@vectr/core';
 
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
@@ -26,9 +16,8 @@ export function downloadSVG(doc: Doc) {
 }
 
 export async function downloadPNG(doc: Doc, scale = 2) {
-  const svg = docToSVG(doc);
   const img = new Image();
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  const url = URL.createObjectURL(new Blob([docToSVG(doc)], { type: 'image/svg+xml' }));
   try {
     await new Promise<void>((res, rej) => {
       img.onload = () => res();
@@ -38,8 +27,7 @@ export async function downloadPNG(doc: Doc, scale = 2) {
     const canvas = document.createElement('canvas');
     canvas.width = doc.width * scale;
     canvas.height = doc.height * scale;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
     if (blob) download(blob, 'vectr.png');
   } finally {
@@ -52,5 +40,12 @@ export async function copySVG(doc: Doc) {
 }
 
 export function downloadProject(doc: Doc) {
-  download(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }), 'vectr-project.json');
+  download(new Blob([serializeDoc(doc)], { type: 'application/json' }), 'vectr-project.json');
+}
+
+/** Copies a link that reopens this exact design. Returns the URL. */
+export async function copyShareLink(doc: Doc): Promise<string> {
+  const url = await shareURL(doc, window.location.href.split('#')[0]);
+  await navigator.clipboard.writeText(url);
+  return url;
 }
