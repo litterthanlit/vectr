@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp, Copy, Eye, EyeOff, Lock, Trash2, Unlock } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
-import { ELEMENTS, RECIPES, SOURCES, createForm, docToSVG, formToSVG, placeElement, renderForm, type FormSpec } from '@vectr/core';
+import { ELEMENTS, RECIPES, SOURCES, createForm, docToSVG, formToSVG, placeElement, renderForm, type FormSpec, type Params, type Style } from '@vectr/core';
 import { useStore } from '../store';
 import { IconButton } from './controls';
 
@@ -23,6 +23,12 @@ export const SOURCE_STARTERS: Record<string, FormSpec> = {
     transform: { rx: 0, ry: 0, perspective: 0 },
     style: { fill: 'shapes', fillOpacity: 1, color: 'ramp', colorBy: 'family', taper: 'none', width: 0.6 },
   },
+  // Like blocks, a strip is flat and solid. The default pattern is a single hyphenated bar, ready to be scaled up as a mark.
+  strip: {
+    source: { kind: 'strip' },
+    transform: { rx: 0, ry: 0, perspective: 0 },
+    style: { fill: 'shapes', fillOpacity: 1, color: 'ramp', colorBy: 'family', taper: 'none', width: 0.6 },
+  },
 };
 
 /** A source added without a starter of its own still gets a tile, rather than crashing the panel. */
@@ -33,18 +39,34 @@ const THUMB_RAMP = ['#52525b', '#a1a1aa', '#fafafa'];
 /**
  * Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit;
  * a context field is hundreds of small blocks, so its outlines are thinned or they would swallow the gaps between them.
+ * A strip is drawn from a few short rows, so the tile shows steps, ramps and slanted ends rather than one thin bar, in the same mid grey as the other tiles.
  */
-const THUMB_LAYOUT: Record<string, { scale: number; x: number; y: number; labelSize: number; width?: number }> = {
+interface Thumb {
+  scale: number;
+  x: number;
+  y: number;
+  labelSize: number;
+  width?: number;
+  /** Source params and style the tile uses in place of the starter's. */
+  params?: Params;
+  style?: Partial<Style>;
+}
+const THUMB_LAYOUT: Record<string, Thumb> = {
   note: { scale: 34, x: 30, y: 66, labelSize: 11 },
   card: { scale: 28, x: 50, y: 50, labelSize: 7 },
   context: { scale: 40, x: 50, y: 50, labelSize: 11, width: 0.15 },
+  strip: { scale: 40, x: 50, y: 50, labelSize: 11, width: 0.2, params: { pattern: '###-####\n######\n####-##\n#####', aspect: 1.1 }, style: { color: 'solid' } },
 };
-const THUMB_DEFAULT = { scale: 36, x: 50, y: 50, labelSize: 11, width: 1 };
+const THUMB_DEFAULT: Thumb = { scale: 36, x: 50, y: 50, labelSize: 11, width: 1 };
 
 const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
   const html = useMemo(() => {
-    const { labelSize, width = 1, ...place } = THUMB_LAYOUT[kind] ?? THUMB_DEFAULT;
-    const form = createForm(starterFor(kind), { x: 50, y: 50 });
+    const { labelSize, width = 1, params, style, ...place } = { ...THUMB_DEFAULT, ...THUMB_LAYOUT[kind] };
+    const starter = starterFor(kind);
+    const form = createForm(
+      { ...starter, source: { ...starter.source, params: { ...starter.source.params, ...params } }, style: { ...starter.style, ...style } },
+      { x: 50, y: 50 },
+    );
     Object.assign(form, place);
     // A solid-colour starter would otherwise take the darkest ramp stop and look dim next to the ramped tiles.
     const stroke = form.style.color === 'solid' ? form.style.stroke ?? THUMB_RAMP[1] : form.style.stroke;
