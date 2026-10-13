@@ -12,10 +12,10 @@ operators on it, and let depth and colour do the drawing. Export clean SVG.
 Every form is a small pipeline:
 
 ```
-source            →  operators, applied top to bottom          →  style
-curve · lattice      revolve · sweep · repeat · mirror · warp      weight and colour follow depth,
-points · note        jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
-orbits · card        ticks                                         markers, labels
+source                →  operators, applied top to bottom          →  style
+curve · lattice ·        revolve · sweep · repeat · mirror · warp      weight and colour follow depth,
+points · note ·          jitter · connect · tile · scatter · resample  hidden faces fade, fills, patterns,
+orbits · card · context  ticks                                         markers, labels
 ```
 
 A circle revolved with an offset is a torus; add a twist warp and it corkscrews. A wave
@@ -24,11 +24,17 @@ nearest neighbours, become a constellation. An arc revolved and resampled into b
 a globe; a circle with ticks is a dial. None of these are built in as fixed shapes;
 they come from combining blocks.
 
-- **6 sources, 11 operators**, each with its own settings, reorderable and toggleable.
+- **7 sources, 11 operators**, each with its own settings, reorderable and toggleable.
   `orbits` lays rings on a shell at many tilts (orbits, gimbals, atoms), `card` is a
   caption panel with a frame, an icon and word-wrapped text, `ticks` hatches every line
   (dials, rulers, combs) with long marks every Nth tick, and `resample` in dots mode can
   keep its lines to string beads on them.
+- **Context, as geometry**: the `context` source draws a context window as a field of
+  token blocks (paste text and each word becomes a block, or generate tokens), with
+  reading order as `t` and relevance as `family`, so a two-stop ramp by family lights up
+  what was retrieved. `connect` mode "To a point" runs threads from the tokens to a chosen
+  focus, which is attention: `split` fans them above and below. The Context window and
+  Attention elements are ready-made.
 - **A signature style**: lines thin and lighten with depth, colour runs along an OKLab
   ramp (by depth, along the line, or per copy), back faces fade, optional ribbon fills
   between neighbouring lines and markers on points. Classic dotted or dashed hidden
@@ -111,7 +117,7 @@ npm run build
 
 ```
 packages/core/src/
-  sources/      curve (15 shapes), lattice, points, note, orbits, card → polylines with t / family / band
+  sources/      curve (15 shapes), lattice, points, note, orbits, card, context → polylines with t / family / band
   operators/    pure (geometry, params) → geometry functions, each with a param schema
   pipeline.ts   source → enabled ops, cached, with a point budget so any stack stays fast
   render.ts     project, split visible/hidden, bucket segments by depth and colour

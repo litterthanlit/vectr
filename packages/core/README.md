@@ -64,6 +64,7 @@ const withDial = { ...doc, forms: [...doc.forms, ...placeElement(dial, doc.width
 | `note` | an annotation: a dot, a leader line and a label |
 | `orbits` | rings on a shell at many tilts: scattered, fanned or nested as a gimbal; radius spread, aspect and arc length |
 | `card` | a caption panel: frame, icon (globe, orbit, dial, crosshair, spiral), word-wrapped multi-line text and an optional meta line. Keep it flat (`rx`, `ry`, `perspective` 0) |
+| `context` | a context window as geometry: a field of token blocks, bars or dots, in a `window` (text rows), `burst` (dense core thinning outward) or `radial` (tokens on rays) layout. Paste up to 4000 characters in `text` and each word becomes a block as long as the word (`highlight` words are relevant), or leave it empty for generated tokens with a seeded `relevant` share. `t` is reading order and `family` is 0 or 1 (relevant), so colour by family with a two-stop ramp picks out what matters; blocks need style `fill: "shapes"` to be solid |
 
 | Operators | |
 | --- | --- |
@@ -73,7 +74,7 @@ const withDial = { ...doc, forms: [...doc.forms, ...placeElement(dial, doc.width
 | `mirror` | reflect across x, y and/or z |
 | `warp` | bend, twist, taper, wave, fan, ripple, bulge, pinch, spherize, noise (normals are carried through) |
 | `jitter` | seeded wobble, grainy to flowing |
-| `connect` | nearest neighbours, within distance, in order, or to the centre; optionally bowed |
+| `connect` | nearest neighbours, within distance, in order, to the centre, or to a point (`focus`: threads converge on `fx`, `fy`, `fz`, with `split` fans above and below, `which` every, relevant or a seeded share of points); optionally bowed |
 | `tile` | a motif at every point; quarter arcs link into loops |
 | `scatter` | points along the lines |
 | `resample` | even spacing, dashes or dots; in dots mode `keepLines` leaves the lines in place so the dots are beads on them |
