@@ -54,6 +54,14 @@ describe('tool surface', () => {
     for (const e of ELEMENTS) expect(text).toContain(e.id);
   });
 
+  it('teaches bursts and finishes: the operator, its modes, ink needing solid fills, and the slower ink previews', () => {
+    const text = client.getInstructions()!;
+    expect(text).toMatch(/burst operator/);
+    for (const word of ['radial', 'horizontal', 'shatter', 'spray', 'keepPoints', 'ink', 'grain', 'rough', 'memory-burst', 'deep']) expect(text).toContain(word);
+    expect(text).toMatch(/ink[^.]*fill "shapes"[^.]*fillOpacity 1/);
+    expect(text).toMatch(/Ink PNG previews are slower at large preview widths/);
+  });
+
   it('accepts every engine style option, so none is rejected at the boundary', async () => {
     const { tools } = await client.listTools();
     const update = tools.find((t) => t.name === 'vectr_update_design')!;
