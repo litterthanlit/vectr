@@ -17,6 +17,12 @@ export const SOURCE_STARTERS: Record<string, FormSpec> = {
     transform: { rx: 0, ry: 0, perspective: 0 },
     style: { taper: 'none', color: 'solid', fill: 'shapes', fillOpacity: 0.12, knockout: true, labelFont: 'sans', labelSize: 18, width: 1 },
   },
+  // Blocks are flat (there is no surface to hide), solid, and coloured by relevance so the few that matter stand out.
+  context: {
+    source: { kind: 'context', params: { layout: 'burst' } },
+    transform: { rx: 0, ry: 0, perspective: 0 },
+    style: { fill: 'shapes', fillOpacity: 1, color: 'ramp', colorBy: 'family', taper: 'none', width: 0.6 },
+  },
 };
 
 /** A source added without a starter of its own still gets a tile, rather than crashing the panel. */
@@ -24,21 +30,25 @@ const starterFor = (kind: string): FormSpec => SOURCE_STARTERS[kind] ?? { source
 
 const THUMB_RAMP = ['#52525b', '#a1a1aa', '#fafafa'];
 
-/** Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit. */
-const THUMB_LAYOUT: Record<string, { scale: number; x: number; y: number; labelSize: number }> = {
+/**
+ * Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit;
+ * a context field is hundreds of small blocks, so its outlines are thinned or they would swallow the gaps between them.
+ */
+const THUMB_LAYOUT: Record<string, { scale: number; x: number; y: number; labelSize: number; width?: number }> = {
   note: { scale: 34, x: 30, y: 66, labelSize: 11 },
   card: { scale: 28, x: 50, y: 50, labelSize: 7 },
+  context: { scale: 40, x: 50, y: 50, labelSize: 11, width: 0.15 },
 };
-const THUMB_DEFAULT = { scale: 36, x: 50, y: 50, labelSize: 11 };
+const THUMB_DEFAULT = { scale: 36, x: 50, y: 50, labelSize: 11, width: 1 };
 
 const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
   const html = useMemo(() => {
-    const { labelSize, ...place } = THUMB_LAYOUT[kind] ?? THUMB_DEFAULT;
+    const { labelSize, width = 1, ...place } = THUMB_LAYOUT[kind] ?? THUMB_DEFAULT;
     const form = createForm(starterFor(kind), { x: 50, y: 50 });
     Object.assign(form, place);
     // A solid-colour starter would otherwise take the darkest ramp stop and look dim next to the ramped tiles.
     const stroke = form.style.color === 'solid' ? form.style.stroke ?? THUMB_RAMP[1] : form.style.stroke;
-    form.style = { ...form.style, width: 1, markerSize: 1.3, labelSize, stroke };
+    form.style = { ...form.style, width, markerSize: 1.3, labelSize, stroke };
     // No paper: a thumbnail sits on its tile, so knockout fills are left see-through.
     return formToSVG(form, renderForm(form, THUMB_RAMP));
   }, [kind]);
