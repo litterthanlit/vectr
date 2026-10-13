@@ -24,6 +24,12 @@ export const ELEMENT_ARTBOARD = 1000;
 const hair: Partial<Style> = { width: 0.9, taper: 'none', color: 'ramp', colorBy: 'depth' };
 const flat: Partial<Transform> = { rx: 0, ry: 0, rz: 0, perspective: 0 };
 
+// The attention element draws one token field twice, as dots and as the points threads leave from, so both share these.
+const ATTENTION_FIELD = { layout: 'window', mark: 'dot', tokens: 700, rows: 40, relevant: 0.12, seed: 5 };
+const ATTENTION_SCALE = 330;
+/** How far above and below the field's middle the two foci sit, in the field's unit space. */
+const ATTENTION_FOCUS = 1.38;
+
 export const ELEMENTS: Element[] = [
   {
     id: 'globe',
@@ -225,6 +231,44 @@ export const ELEMENTS: Element[] = [
         style: { ...hair, width: 2.2, colorBy: 'family' },
         transform: { scale: 380, ...flat },
       },
+    ],
+  },
+  {
+    id: 'context-window',
+    name: 'Context window',
+    blurb: 'A burst of solid token blocks, dense at the core and thinning outward, the few relevant ones picked out by colour',
+    forms: [{
+      name: 'Context window',
+      source: { kind: 'context', params: { layout: 'burst', tokens: 1800, rows: 84, falloff: 0.55, relevant: 0.08, height: 0.78, seed: 12 } },
+      style: { ...hair, width: 0.4, colorBy: 'family', fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 470, ...flat },
+    }],
+  },
+  {
+    id: 'attention',
+    name: 'Attention',
+    blurb: 'A field of token dots with dotted threads from the relevant ones converging above and below on two rings of focus',
+    forms: [
+      {
+        name: 'Token field',
+        source: { kind: 'context', params: ATTENTION_FIELD },
+        style: { ...hair, colorBy: 'family', markers: 'dot', markerSize: 2.8, markersByDepth: false },
+        transform: { scale: ATTENTION_SCALE, ...flat },
+      },
+      {
+        name: 'Attention threads',
+        source: { kind: 'context', params: ATTENTION_FIELD },
+        ops: [{ kind: 'connect', params: { mode: 'focus', fx: 0, fy: ATTENTION_FOCUS, fz: 0, split: true, which: 'relevant', bow: 0.1, keepLines: false, seed: 5 } }],
+        style: { ...hair, width: 1.1, colorBy: 'family', dash: 'dotted' },
+        transform: { scale: ATTENTION_SCALE, ...flat },
+      },
+      ...[-1, 1].map((side): ElementForm => ({
+        name: side < 0 ? 'Upper focus' : 'Lower focus',
+        source: { kind: 'note', params: { text: '', length: 0, elbow: 0 } },
+        style: { ...hair, width: 1.6, markers: 'ring', markerSize: 7, markersByDepth: false },
+        transform: { scale: 100, ...flat },
+        offset: { x: 0, y: side * ATTENTION_FOCUS * ATTENTION_SCALE },
+      })),
     ],
   },
 ];

@@ -210,6 +210,49 @@ describe('elements', () => {
     expect(describeBlocks().elementsNote).toMatch(/1000/);
   });
 
+  it('ships the context window: a flat burst of solid blocks coloured by relevance', () => {
+    const element = ELEMENTS.find((e) => e.id === 'context-window')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'context', params: { layout: 'burst', mark: 'block' } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp' });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(g.lines.length).toBeGreaterThan(400);
+    expect(g.nodes.some((n) => n.family === 1) && g.nodes.some((n) => n.family === 0)).toBe(true);
+    // Solid blocks: both colour families of fill show up when rendered.
+    expect(renderForm(form, DOC.ramp).fills).toHaveLength(2);
+  });
+
+  it('ships attention: one token field as dots, threads from the same field to two foci, and a ring at each', () => {
+    const element = ELEMENTS.find((e) => e.id === 'attention')!;
+    const forms = placeElement(element, 1000, 1000);
+    const [field, threads, ...rings] = forms;
+    expect(field.source.kind).toBe('context');
+    expect(field.source.params.mark).toBe('dot');
+    expect(field.style.markers).toBe('dot');
+    // The threads leave from the very same dots, so both forms share the source and the placement.
+    expect(threads.source).toEqual(field.source);
+    expect([threads.x, threads.y, threads.scale]).toEqual([field.x, field.y, field.scale]);
+    expect(threads.ops).toHaveLength(1);
+    expect(threads.ops[0]).toMatchObject({ kind: 'connect', params: { mode: 'focus', split: true, which: 'relevant', keepLines: false } });
+    expect(threads.style).toMatchObject({ dash: 'dotted', colorBy: 'family' });
+    expect(threads.style.width).toBeLessThan(2);
+    // Every thread ends at one of the two foci, above and below the field.
+    const fy = Number(threads.ops[0].params.fy);
+    const ends = new Set(buildForm(threads).geometry.lines.map((l) => l.pts[l.pts.length - 1].join(',')));
+    expect(ends).toEqual(new Set([`0,${fy},0`, `0,${-fy},0`]));
+    // The rings sit exactly on the foci, in artboard pixels (y runs down).
+    expect(rings).toHaveLength(2);
+    expect(rings.map((r) => r.y).sort((a, b) => a - b)).toEqual([field.y - fy * field.scale, field.y + fy * field.scale]);
+    for (const r of rings) {
+      expect(r.x).toBe(field.x);
+      expect(r.style.markers).toBe('ring');
+      expect(buildForm(r).geometry.nodes).toHaveLength(1);
+    }
+    for (const f of forms) expect(f).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+  });
+
   it('keeps every card flat, in elements and in recipes', () => {
     const cards = [
       ...ELEMENTS.flatMap((e) => e.forms.filter((f) => f.source.kind === 'card').map((f) => ({ ...DEFAULT_CARD_VIEW, ...f.transform }))),
