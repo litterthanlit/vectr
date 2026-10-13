@@ -5,6 +5,7 @@ import { migrateV1 } from './migrate.js';
 import { OPERATORS, opFor } from './operators/index.js';
 import { MAX_OPS } from './pipeline.js';
 import { RECIPES } from './recipes.js';
+import { cleanText } from './render.js';
 import { SOURCES, sourceFor } from './sources/index.js';
 import { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 import { THEMES } from './themes.js';
@@ -55,7 +56,7 @@ function sanitizeParam(def: ParamDef, v: unknown, fallback: Params[string], warn
       warn(`"${def.key}" must be one of: ${def.options.map((o) => o.value).join(', ')}`);
       return fallback;
     case 'text':
-      return typeof v === 'string' ? v.slice(0, LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
+      return typeof v === 'string' ? cleanText(v).slice(0, LIMITS.maxText) : (warn(`"${def.key}" should be text`), fallback);
   }
 }
 
@@ -307,7 +308,7 @@ export function describeBlocks() {
         case 'select':
           return { ...base, type: 'enum', options: d.options.map((o) => o.value) };
         case 'text':
-          return { ...base, type: 'string', maxLength: LIMITS.maxText };
+          return { ...base, type: 'string', maxLength: LIMITS.maxText, ...(d.multiline ? { multiline: true } : {}) };
       }
     });
   return {
