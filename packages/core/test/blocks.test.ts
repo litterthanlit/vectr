@@ -17,7 +17,7 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 describe('registration', () => {
   it('lists the new blocks in order', () => {
     expect(SOURCES.map((s) => s.kind)).toEqual(['curve', 'lattice', 'points', 'note', 'orbits', 'card', 'context', 'strip']);
-    expect(OPERATORS[OPERATORS.length - 1].kind).toBe('ticks');
+    expect(OPERATORS[OPERATORS.length - 1].kind).toBe('burst');
   });
 });
 
@@ -65,7 +65,7 @@ describe('slab', () => {
 
   it('never throws on empty or odd input', () => {
     for (const args of [[0, 0, 0, 0], [1, 1, 0, 1], [0, 1, 1, 1], [NaN, 1, 0, 1], [0, Infinity, 0, 1]] as const) {
-      expect(() => slab(...args, { lean: 9, start: true, finish: true, radius: 1, res: 3 })).not.toThrow();
+      expect(() => slab(args[0], args[1], args[2], args[3], { lean: 9, start: true, finish: true, radius: 1, res: 3 })).not.toThrow();
     }
   });
 });
@@ -1796,5 +1796,429 @@ describe('strip', () => {
       expect(finite(buildForm(v).geometry)).toBe(true);
     }
     for (const v of variations(make({ kind: 'strip', params: { mode: 'generate' } }), 12, 5, 1)) expect(finite(buildForm(v).geometry)).toBe(true);
+  });
+});
+
+describe('burst', () => {
+  /** A full, dense field of square-ended blocks, so every piece of it is a plain rectangle. */
+  const FIELD = { layout: 'window', tokens: 700, rows: 30, density: 1, height: 0.8, cut: 'square', seed: 4 };
+  /** Burst settings that move pieces by the push alone: no cutting, thinning, ragged rays, turning or stretching. */
+  const PLAIN = { shatter: 0, spray: 0, scatter: 0, jitter: 0, stretch: 0, align: 0 };
+  const burstOf = (burst: Record<string, unknown> = {}, ctx: Record<string, unknown> = FIELD) => stack({ kind: 'context', params: ctx }, [{ kind: 'burst', params: burst }]);
+  const original = (ctx: Record<string, unknown> = FIELD) => stack({ kind: 'context', params: ctx });
+  const mid = (l: Polyline): [number, number] => [l.pts.reduce((s, q) => s + q[0], 0) / l.pts.length, l.pts.reduce((s, q) => s + q[1], 0) / l.pts.length];
+  const radius = (l: Polyline) => Math.hypot(...mid(l));
+  const extent = (l: Polyline) => {
+    const xs = l.pts.map((q) => q[0]), ys = l.pts.map((q) => q[1]);
+    return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  };
+  const area = (l: Polyline) => Math.abs(l.pts.reduce((s, q, i) => s + q[0] * l.pts[(i + 1) % l.pts.length][1] - l.pts[(i + 1) % l.pts.length][0] * q[1], 0)) / 2;
+  const total = (g: Geometry) => g.lines.reduce((s, l) => s + area(l), 0);
+  const points = (g: Geometry) => g.lines.reduce((s, l) => s + l.pts.length, 0) + g.nodes.length;
+  const key = (l: Polyline) => JSON.stringify(l.pts);
+
+  it('is registered last, with a name, a blurb and every param in range', () => {
+    const def = opFor('burst')!;
+    expect(def.name).toBe('Burst');
+    expect(def.blurb).toMatch(/dense core/);
+    expect(OPERATORS[OPERATORS.length - 1]).toBe(def);
+    for (const d of def.params) {
+      const v = def.defaults[d.key];
+      expect(v, d.key).toBeDefined();
+      if (d.kind === 'range') {
+        expect(v as number, d.key).toBeGreaterThanOrEqual(d.min);
+        expect(v as number, d.key).toBeLessThanOrEqual(d.max);
+      }
+    }
+    expect(def.params.find((d) => d.key === 'shatter')).toMatchObject({ min: 0, max: 24, step: 1 });
+    expect(def.params.find((d) => d.key === 'spray')).toMatchObject({ min: 0, max: 600, step: 1 });
+    expect(def.params.find((d) => d.key === 'align')!.when).toEqual({ key: 'mode', in: ['radial'] });
+    expect(describeBlocks().operators.find((o) => o.kind === 'burst')!.params.map((p) => p.key)).toEqual(def.params.map((d) => d.key));
+  });
+
+  it('leaves everything inside the core exactly where it was, and pushes what is outside it away', () => {
+    const before = original(), after = burstOf({ ...PLAIN, core: 0.45, strength: 1.5 });
+    expect(after.lines).toHaveLength(before.lines.length);
+    let inside = 0, outside = 0;
+    before.lines.forEach((l, i) => {
+      const r = radius(l);
+      if (r < 0.44) {
+        inside++;
+        expect(after.lines[i].pts).toEqual(l.pts);
+      } else if (r > 0.75) {
+        outside++;
+        expect(radius(after.lines[i])).toBeGreaterThan(r + 0.05);
+        // Straight out from the centre: the piece keeps its direction.
+        const [a, b] = [mid(l), mid(after.lines[i])];
+        expect(Math.abs(a[0] * b[1] - a[1] * b[0]) / (Math.hypot(...a) * Math.hypot(...b))).toBeLessThan(1e-9);
+      }
+    });
+    expect(inside).toBeGreaterThan(20);
+    expect(outside).toBeGreaterThan(100);
+  });
+
+  it('barely moves what is just outside the core, and moves the edge much more (the push builds with falloff)', () => {
+    const before = original(), after = burstOf({ ...PLAIN, core: 0.4, strength: 1, falloff: 2 });
+    const shift = (i: number) => Math.hypot(...(mid(after.lines[i]).map((v, k) => v - mid(before.lines[i])[k]) as [number, number]));
+    const near = before.lines.map((l, i) => [radius(l), i] as const).filter(([r]) => r > 0.4 && r < 0.46).map(([, i]) => shift(i));
+    const far = before.lines.map((l, i) => [radius(l), i] as const).filter(([r]) => r > 1.1).map(([, i]) => shift(i));
+    expect(near.length).toBeGreaterThan(0);
+    expect(far.length).toBeGreaterThan(0);
+    expect(Math.max(...near)).toBeLessThan(0.02);
+    expect(Math.min(...far)).toBeGreaterThan(0.2);
+  });
+
+  it('pushes more with strength, and not at all with strength 0', () => {
+    const before = original();
+    expect(burstOf({ ...PLAIN, strength: 0 }).lines.map((l) => l.pts)).toEqual(before.lines.map((l) => l.pts));
+    const sum = (g: Geometry) => g.lines.reduce((s, l) => s + radius(l), 0);
+    expect(sum(burstOf({ ...PLAIN, strength: 0.5 }))).toBeGreaterThan(sum(before));
+    expect(sum(burstOf({ ...PLAIN, strength: 1.5 }))).toBeGreaterThan(sum(burstOf({ ...PLAIN, strength: 0.5 })));
+  });
+
+  it('stretches pieces along their flight, more the farther out they are', () => {
+    const before = original(), flat = burstOf({ ...PLAIN, strength: 0.4 }), long = burstOf({ ...PLAIN, strength: 0.4, stretch: 2 });
+    let near = 0, far = 0;
+    before.lines.forEach((l, i) => {
+      const r = radius(l);
+      expect(extent(flat.lines[i])).toBeCloseTo(extent(l), 9);
+      if (r < 0.3) expect(extent(long.lines[i])).toBeCloseTo(extent(l), 9);
+      else if (r > 0.9) {
+        far++;
+        expect(extent(long.lines[i])).toBeGreaterThan(extent(l) * 1.5);
+      } else if (r > 0.5) near++;
+    });
+    expect(far).toBeGreaterThan(20);
+    expect(near).toBeGreaterThan(20);
+    const grown = (lo: number, hi: number) => {
+      const k = before.lines.map((l, i) => [radius(l), extent(long.lines[i]) / extent(l)] as const).filter(([r]) => r > lo && r < hi).map(([, f]) => f);
+      return k.reduce((s, f) => s + f, 0) / k.length;
+    };
+    expect(grown(0.9, 1.5)).toBeGreaterThan(grown(0.5, 0.7));
+  });
+
+  it('turns pieces toward their flight with align, and not at all without it', () => {
+    const level = (g: Geometry) => g.lines.filter((l) => l.pts.length === 4 && Math.abs(l.pts[0][1] - l.pts[1][1]) < 1e-9).length;
+    expect(level(burstOf({ ...PLAIN, strength: 1 }))).toBe(original().lines.length);
+    const turned = burstOf({ ...PLAIN, strength: 1, align: 1 });
+    expect(level(turned)).toBeLessThan(original().lines.length * 0.5);
+    // Fully aligned pieces lie along the line from the centre: the long edge points where the piece flew.
+    let checked = 0;
+    for (const l of turned.lines) {
+      if (radius(l) < 1.2) continue;
+      // The longer of the two edges that meet at the first corner.
+      const [a, b, d] = [l.pts[0], l.pts[1], l.pts[3]], c = mid(l);
+      const edge = len(sub(b, a)) >= len(sub(d, a)) ? sub(b, a) : sub(d, a);
+      const along = Math.abs(edge[0] * c[0] + edge[1] * c[1]) / (len(edge) * Math.hypot(...c));
+      expect(along).toBeGreaterThan(0.97);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
+  it('thins the edge with scatter and leaves the core whole', () => {
+    const before = original(), after = burstOf({ ...PLAIN, scatter: 0.8, core: 0.5, strength: 0 });
+    expect(after.lines.length).toBeLessThan(before.lines.length);
+    expect(after.lines.length).toBeGreaterThan(before.lines.length * 0.3);
+    const inner = (g: Geometry) => g.lines.filter((l) => radius(l) < 0.45).length;
+    expect(inner(after)).toBe(inner(before));
+    // The farther out, the fewer survive.
+    const share = (lo: number, hi: number) => after.lines.filter((l) => { const r = radius(l); return r >= lo && r < hi; }).length / Math.max(1, before.lines.filter((l) => { const r = radius(l); return r >= lo && r < hi; }).length);
+    expect(share(0.4, 0.8)).toBeGreaterThan(share(1, 1.6));
+    expect(burstOf({ ...PLAIN, scatter: 0 }).lines).toHaveLength(before.lines.length);
+  });
+
+  describe('shatter', () => {
+    it('cuts closed shapes into slices that stay closed, tile the shape, and keep t and family', () => {
+      const before = original(), after = burstOf({ ...PLAIN, strength: 0, shatter: 4 });
+      expect(after.lines.length).toBeGreaterThan(before.lines.length * 2);
+      expect(after.lines.length).toBeLessThanOrEqual(before.lines.length * 4);
+      for (const l of after.lines) {
+        expect(l.closed).toBe(true);
+        expect(l.pts.length).toBeGreaterThanOrEqual(3);
+        expect(area(l)).toBeGreaterThan(0);
+        expect(l.t).toHaveLength(l.pts.length);
+        expect([0, 1]).toContain(l.family);
+        expect(l.band).toBeUndefined();
+      }
+      expect(total(after)).toBeCloseTo(total(before), 9);
+      // Each block's slices carry the block's t, in order.
+      const ts = new Set(before.lines.map((l) => l.t![0]));
+      for (const l of after.lines) expect(ts.has(l.t![0])).toBe(true);
+    });
+
+    it('cuts concave shapes too, without losing any area', () => {
+      const strip = { mode: 'pattern', pattern: '####--######\n##--##--###', corner: 0, ramp: 40 };
+      const before = stack({ kind: 'strip', params: strip }), after = stack({ kind: 'strip', params: strip }, [{ kind: 'burst', params: { ...PLAIN, strength: 0, shatter: 7 } }]);
+      expect(after.lines.length).toBeGreaterThan(before.lines.length * 3);
+      for (const l of after.lines) {
+        expect(l.closed).toBe(true);
+        expect(l.pts.length).toBeGreaterThanOrEqual(3);
+        expect(finite({ lines: [l], nodes: [] })).toBe(true);
+      }
+      expect(total(after)).toBeCloseTo(total(before), 9);
+    });
+
+    it('cuts open lines into runs by arc length, end to end', () => {
+      const line = { kind: 'curve', params: { shape: 'line' } };
+      const before = stack(line), after = stack(line, [{ kind: 'burst', params: { ...PLAIN, strength: 0, shatter: 5 } }]);
+      expect(before.lines).toHaveLength(1);
+      expect(after.lines).toHaveLength(5);
+      const run = (l: Polyline) => l.pts.reduce((s, q, i) => (i ? s + len(sub(q, l.pts[i - 1])) : 0), 0);
+      for (let i = 0; i < 5; i++) {
+        expect(after.lines[i].closed).toBeFalsy();
+        if (i) expect(after.lines[i].pts[0]).toEqual(after.lines[i - 1].pts[after.lines[i - 1].pts.length - 1]);
+      }
+      expect(after.lines.reduce((s, l) => s + run(l), 0)).toBeCloseTo(run(before.lines[0]), 9);
+      expect(after.lines[0].pts[0]).toEqual(before.lines[0].pts[0]);
+    });
+
+    it('lets the slices of one block fly apart: gaps open between slices that sat edge to edge', () => {
+      const before = original(), after = burstOf({ ...PLAIN, strength: 1.2, shatter: 3 });
+      // Slices of a block are consecutive and share its t.
+      const groups = new Map<number, Polyline[]>();
+      for (const l of after.lines) groups.set(l.t![0], [...(groups.get(l.t![0]) ?? []), l]);
+      let apart = 0, sideways = 0;
+      for (const l of before.lines) {
+        const [x, y] = mid(l);
+        if (Math.hypot(x, y) < 0.9 || Math.abs(y) > 0.5 * Math.abs(x)) continue;
+        sideways++;
+        const slices = (groups.get(l.t![0]) ?? []).sort((a, b) => Math.min(...a.pts.map((q) => q[0])) - Math.min(...b.pts.map((q) => q[0])));
+        const gap = slices.slice(1).some((s, i) => Math.min(...s.pts.map((q) => q[0])) - Math.max(...slices[i].pts.map((q) => q[0])) > 1e-6);
+        if (slices.length > 1 && gap) apart++;
+      }
+      expect(sideways).toBeGreaterThan(8);
+      expect(apart).toBeGreaterThan(sideways * 0.8);
+      expect(total(after)).toBeCloseTo(total(burstOf({ ...PLAIN, strength: 1.2, shatter: 0 })), 6);
+    });
+
+    it('is capped by the point budget, however many slices are asked for', () => {
+      const heavy = { kind: 'context', params: { layout: 'window', tokens: 3000, rows: 160, density: 1, falloff: 0, cut: 'square' } };
+      const built = buildForm(make(heavy, [{ kind: 'burst', params: { shatter: 24, spray: 600 } }]));
+      expect(built.warnings).toEqual([]);
+      expect(points(built.geometry)).toBeLessThan(POINT_BUDGET);
+      expect(built.geometry.lines.length).toBeGreaterThan(3000);
+      expect(finite(built.geometry)).toBe(true);
+      // Open lines are budgeted too.
+      const bars = buildForm(make({ ...heavy, params: { ...heavy.params, mark: 'line' } }, [{ kind: 'burst', params: { shatter: 24, spray: 600 } }]));
+      expect(bars.warnings).toEqual([]);
+      expect(points(bars.geometry)).toBeLessThan(POINT_BUDGET);
+    });
+  });
+
+  describe('spray', () => {
+    it('adds exactly the number of droplets asked for, and only nodes', () => {
+      const still = { scatter: 0, shatter: 0 };
+      for (const keepPoints of [true, false]) {
+        const base = burstOf({ ...still, spray: 0, keepPoints });
+        expect(base.nodes.length).toBe(keepPoints ? original().nodes.length : 0);
+        for (const n of [1, 37, 300, 600]) {
+          const g = burstOf({ ...still, spray: n, keepPoints });
+          expect(g.nodes.length - base.nodes.length).toBe(n);
+          expect(g.lines).toEqual(base.lines);
+          expect(finite(g)).toBe(true);
+        }
+      }
+      // With the defaults too, thinning and cutting included.
+      expect(burstOf({ spray: 25 }).nodes).toHaveLength(25);
+      expect(burstOf({ spray: 25, keepPoints: true }).nodes.length).toBeGreaterThan(25);
+    });
+
+    it('throws droplets past the pieces, carrying the t and family of the piece that threw them', () => {
+      const none = burstOf({ spray: 0, keepPoints: false }), g = burstOf({ spray: 400, keepPoints: false, relevant: 0.3 }, { ...FIELD, relevant: 0.3 });
+      expect(g.nodes).toHaveLength(400);
+      const median = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+      expect(median(g.nodes.map((n) => Math.hypot(n.p[0], n.p[1])))).toBeGreaterThan(median(none.lines.map(radius)));
+      for (const n of g.nodes) {
+        expect(n.t).toBeGreaterThanOrEqual(0);
+        expect(n.t).toBeLessThanOrEqual(1);
+        expect([0, 1]).toContain(n.family);
+        // Size comes through depth: droplets sit at or behind the plane of the pieces.
+        expect(n.p[2]).toBeLessThanOrEqual(0);
+        expect(n.p[2]).toBeGreaterThanOrEqual(-0.2 - 1e-12);
+      }
+      expect(new Set(g.nodes.map((n) => n.family))).toEqual(new Set([0, 1]));
+      expect(new Set(g.nodes.map((n) => n.p[2])).size).toBeGreaterThan(100);
+      // The families thrown follow the pieces that fly: relevant pieces make relevant droplets.
+      const noRelevant = burstOf({ spray: 100, keepPoints: false }, { ...FIELD, relevant: 0 });
+      expect(noRelevant.nodes.every((n) => n.family === 0)).toBe(true);
+    });
+
+    it('is thrown by the points alone when a form has no lines', () => {
+      const pts = stack({ kind: 'points', params: { count: 60 } });
+      expect(pts.lines).toEqual([]);
+      const out = stack({ kind: 'points', params: { count: 60 } }, [{ kind: 'burst', params: { spray: 50, scatter: 0, keepPoints: true } }]);
+      expect(out.lines).toEqual([]);
+      expect(out.nodes).toHaveLength(60 + 50);
+      expect(stack({ kind: 'points', params: { count: 60 } }, [{ kind: 'burst', params: { spray: 50, scatter: 0 } }]).nodes).toHaveLength(50);
+      expect(finite(out)).toBe(true);
+    });
+
+    it('is stable: more spray only adds droplets, and a change to spray never moves a piece', () => {
+      const a = burstOf({ spray: 120, keepPoints: false }), b = burstOf({ spray: 240, keepPoints: false }), c = burstOf({ spray: 0, keepPoints: false });
+      expect(b.nodes.slice(0, 120)).toEqual(a.nodes);
+      expect(a.lines).toEqual(c.lines);
+      expect(b.lines).toEqual(c.lines);
+    });
+  });
+
+  describe('horizontal mode', () => {
+    it('keeps every piece level and flies mostly sideways', () => {
+      const before = original(), after = burstOf({ ...PLAIN, mode: 'horizontal', strength: 1.2, stretch: 2 });
+      expect(after.lines).toHaveLength(before.lines.length);
+      let dx = 0, dy = 0;
+      before.lines.forEach((l, i) => {
+        const o = after.lines[i];
+        expect(o.pts).toHaveLength(4);
+        // Bottom and top edges stay level, and the sides stay upright: a rectangle stays a rectangle.
+        expect(o.pts[0][1]).toBeCloseTo(o.pts[1][1], 9);
+        expect(o.pts[2][1]).toBeCloseTo(o.pts[3][1], 9);
+        expect(o.pts[0][0]).toBeCloseTo(o.pts[3][0], 9);
+        expect(o.pts[1][0]).toBeCloseTo(o.pts[2][0], 9);
+        const [a, b] = [mid(l), mid(o)];
+        dx += Math.abs(b[0] - a[0]);
+        dy += Math.abs(b[1] - a[1]);
+      });
+      expect(dx).toBeGreaterThan(dy * 1.6);
+      // Heights are untouched: only the length grows.
+      before.lines.forEach((l, i) => expect(after.lines[i].pts[3][1] - after.lines[i].pts[0][1]).toBeCloseTo(l.pts[3][1] - l.pts[0][1], 9));
+      expect(after.lines.some((l, i) => l.pts[1][0] - l.pts[0][0] > (before.lines[i].pts[1][0] - before.lines[i].pts[0][0]) * 2)).toBe(true);
+    });
+
+    it('ignores align, and differs from radial', () => {
+      expect(burstOf({ ...PLAIN, mode: 'horizontal', align: 1, strength: 1 })).toEqual(burstOf({ ...PLAIN, mode: 'horizontal', align: 0, strength: 1 }));
+      expect(burstOf({ ...PLAIN, mode: 'horizontal', strength: 1 })).not.toEqual(burstOf({ ...PLAIN, mode: 'radial', strength: 1 }));
+    });
+  });
+
+  it('bursts from the centre it is given: what is around it stays, what was around the old centre flies', () => {
+    const base = original(), at = (cx: number, cy: number) => burstOf({ ...PLAIN, core: 0.3, strength: 1, cx, cy });
+    const moved = at(0.6, -0.5), home = at(0, 0);
+    let kept = 0, freed = 0;
+    base.lines.forEach((l, i) => {
+      const [x, y] = mid(l);
+      if (Math.hypot(x - 0.6, y + 0.5) < 0.29) {
+        kept++;
+        expect(moved.lines[i].pts).toEqual(l.pts);
+      }
+      if (Math.hypot(x, y) < 0.25 && Math.hypot(x - 0.6, y + 0.5) > 0.6) {
+        freed++;
+        // Inside the old core, outside the new one: it now flies, away from the new centre.
+        expect(home.lines[i].pts).toEqual(l.pts);
+        expect(Math.hypot(...(mid(moved.lines[i]).map((v, k) => v - [0.6, -0.5][k]) as [number, number]))).toBeGreaterThan(Math.hypot(x - 0.6, y + 0.5));
+      }
+    });
+    expect(kept).toBeGreaterThan(5);
+    expect(freed).toBeGreaterThan(5);
+  });
+
+  it('carries points with their pieces, drops them with keepPoints off, and leaves t and family alone', () => {
+    const before = original(), after = burstOf({ ...PLAIN, strength: 1.2, keepPoints: true });
+    expect(burstOf({ ...PLAIN, strength: 1.2 }).nodes).toEqual([]);
+    expect(after.nodes).toHaveLength(before.nodes.length);
+    after.nodes.forEach((n, i) => {
+      expect(n.t).toBe(before.nodes[i].t);
+      expect(n.family).toBe(before.nodes[i].family);
+      // Each point rides with its block: it stays at the block's centre.
+      const c = mid(after.lines[i]);
+      expect(n.p[0]).toBeCloseTo(c[0], 9);
+      expect(n.p[1]).toBeCloseTo(c[1], 9);
+      expect(n.p[2]).toBe(before.nodes[i].p[2]);
+    });
+    expect(burstOf({ ...PLAIN, keepPoints: false }).nodes).toEqual([]);
+    // Scatter thins points together with their blocks.
+    const thin = burstOf({ ...PLAIN, scatter: 0.9, strength: 1, keepPoints: true });
+    expect(thin.nodes.length).toBe(thin.lines.length);
+  });
+
+  it('is deterministic per seed, and each seed rays differently', () => {
+    const run = (seed: number) => burstOf({ seed });
+    expect(run(5)).toEqual(run(5));
+    expect(run(5)).not.toEqual(run(6));
+  });
+
+  it('never reshuffles when one setting changes: a piece that survives thinning is where it always was', () => {
+    const base = { strength: 1, shatter: 2, spray: 0 };
+    const keep = new Set(burstOf({ ...base, scatter: 0.2 }).lines.map(key));
+    const more = burstOf({ ...base, scatter: 0.7 });
+    expect(more.lines.length).toBeLessThan(burstOf({ ...base, scatter: 0.2 }).lines.length);
+    for (const l of more.lines) expect(keep.has(key(l))).toBe(true);
+  });
+
+  it('makes jitter rays ragged and shared by neighbours: jitter 0 is straight out, more is spikier', () => {
+    const straight = burstOf({ ...PLAIN, strength: 1 });
+    const cross = (l: Polyline, i: number) => {
+      const [a, b] = [mid(original().lines[i]), mid(l)];
+      return Math.abs(a[0] * b[1] - a[1] * b[0]) / (Math.hypot(...a) * Math.hypot(...b) || 1);
+    };
+    expect(Math.max(...straight.lines.map(cross))).toBeLessThan(1e-9);
+    const rough = burstOf({ ...PLAIN, strength: 1, jitter: 1 });
+    expect(Math.max(...rough.lines.map(cross))).toBeGreaterThan(0.05);
+    const spread = (g: Geometry) => {
+      const r = g.lines.map(radius).filter((x) => x > 1);
+      const m = r.reduce((s, x) => s + x, 0) / r.length;
+      return Math.sqrt(r.reduce((s, x) => s + (x - m) ** 2, 0) / r.length);
+    };
+    expect(spread(rough)).toBeGreaterThan(spread(straight));
+  });
+
+  it('passes empty geometry through untouched, and never throws on odd input', () => {
+    const op = opFor('burst')!;
+    const empty: Geometry = { lines: [], nodes: [] };
+    expect(op.apply(empty, op.defaults)).toBe(empty);
+    const odd: Geometry = {
+      lines: [
+        { pts: [], closed: true }, { pts: [[0, 0, 0]] }, { pts: [[NaN, 1, 0], [1, Infinity, 0], [2, 2, 0]], closed: true },
+        { pts: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], closed: true }, { pts: [[1, 1, 0], [1, 1, 0]] }, { pts: [[0, 0, 0], [1, 0, 0], [1, 1, 0]], closed: true, family: 2 },
+      ],
+      nodes: [{ p: [NaN, 0, 0] }, { p: [0, 0, 0] }, { p: [3, 3, 0], family: 1, t: 0.2 }],
+      labels: [{ p: [1, 1, 0], text: 'x' }, { p: [NaN, 1, 0], text: 'y' }],
+    };
+    for (const params of [{}, { shatter: 24, spray: 600, jitter: 1, stretch: 4, scatter: 0, strength: 3, falloff: 0.2, core: 0 }, { mode: 'horizontal', cx: 2, cy: -2 }, { strength: NaN, core: Infinity, seed: -3, spray: 5 }]) {
+      const out = op.apply(odd, { ...op.defaults, ...params } as Params);
+      expect(out.lines.every((l) => l.pts.every((q) => q.length === 3))).toBe(true);
+      expect(out.nodes.length + out.lines.length).toBeGreaterThan(0);
+    }
+    const out = op.apply({ lines: [], nodes: [{ p: [1, 0, 0] }] }, { ...op.defaults, scatter: 0, keepPoints: true });
+    expect(out.nodes.length).toBe(1 + 300);
+    // Whatever it is given, a built form is finite.
+    for (const params of [{ strength: 3, stretch: 4, shatter: 24, jitter: 1, core: 0, falloff: 0.2 }, { strength: 0, stretch: 0 }, { core: 2 }]) {
+      expect(finite(burstOf(params))).toBe(true);
+    }
+  });
+
+  it('carries normals along, turned with their piece, and drops ribbon bands', () => {
+    const sphere = { kind: 'curve', params: { shape: 'arc', start: -90, sweep: 180 } };
+    const ring = stack(sphere, [{ kind: 'revolve', params: { rings: 6, spokes: 8 } }]);
+    const out = stack(sphere, [{ kind: 'revolve', params: { rings: 6, spokes: 8 } }, { kind: 'burst', params: { shatter: 3, core: 0.2, align: 0 } }]);
+    expect(ring.lines.some((l) => l.band !== undefined)).toBe(true);
+    expect(out.lines.every((l) => l.band === undefined)).toBe(true);
+    expect(out.lines.length).toBeGreaterThan(0);
+    for (const l of out.lines) {
+      expect(l.normals).toHaveLength(l.pts.length);
+      expect(l.normals!.every((n) => Math.abs(len(n) - 1) < 1e-6)).toBe(true);
+    }
+    expect(finite(out)).toBe(true);
+  });
+
+  it('works on every layout, a strip and pasted text, and renders', () => {
+    for (const source of [
+      { kind: 'context', params: { layout: 'burst' } }, { kind: 'context', params: { layout: 'radial' } }, { kind: 'context', params: { mark: 'line' } },
+      { kind: 'context', params: { mark: 'dot' } }, { kind: 'context', params: { text: 'The model reads every token in its window. Attention is not spread evenly.' } },
+      { kind: 'strip', params: { mode: 'generate' } }, { kind: 'card', params: {} },
+    ]) {
+      const form = make(source, [{ kind: 'burst', params: {} }]);
+      const built = buildForm(form);
+      expect(built.warnings, source.kind).toEqual([]);
+      expect(finite(built.geometry)).toBe(true);
+      expect(renderForm({ ...form, style: { ...form.style, fill: 'shapes', markers: 'dot' } }, ['#222', '#fff']).warnings).toEqual([]);
+    }
+  });
+
+  it('is part of a parsed design, with out-of-range values corrected', () => {
+    const { doc, warnings } = parseDoc({ forms: [{ source: { kind: 'context' }, ops: [{ kind: 'burst', params: { shatter: 99, spray: -5, mode: 'sideways', stretch: 9 } }] }] });
+    expect(warnings).toHaveLength(4);
+    expect(doc.forms[0].ops[0].params).toMatchObject({ shatter: 24, spray: 0, mode: 'radial', stretch: 4 });
+    expect(parseDoc({ forms: [{ source: { kind: 'context' }, ops: [{ kind: 'burst' }] }] }).warnings).toEqual([]);
   });
 });

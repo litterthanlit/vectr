@@ -240,6 +240,31 @@ describe('design lifecycle', () => {
     expect(b.source.params).toMatchObject({ pattern, finishEnd: 'round', ramp: 45 });
   });
 
+  it('lists the burst operator, and builds and previews a burst', async () => {
+    const listing = textOf(await call('vectr_list_building_blocks', { block: 'burst' }));
+    expect(listing).toMatch(/^### burst — Burst/);
+    expect(listing).toMatch(/`shatter` \(Shatter\): 0–24/);
+    expect(listing).toMatch(/`spray` \(Spray\): 0–600/);
+    expect(listing).toMatch(/`align` \(Align\)[^\n]*only when mode is radial/);
+
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [{
+          source: { kind: 'context', params: { layout: 'burst', tokens: 600, cut: 'slant', cutAngle: 30 } },
+          ops: [{ kind: 'burst', params: { shatter: 2, spray: 80, keepPoints: true, mode: 'horizontal' } }],
+          style: { fill: 'shapes', colorBy: 'family', markers: 'dot', markerSize: 7 },
+        }],
+      },
+      preview_width: 320,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const f = design(r).forms[0] as { source: { params: Record<string, unknown> }; ops: { kind: string; params: Record<string, unknown> }[] };
+    expect(f.source.params).toMatchObject({ cut: 'slant', cutAngle: 30 });
+    expect(f.ops[0]).toMatchObject({ kind: 'burst', params: { shatter: 2, spray: 80, keepPoints: true, mode: 'horizontal' } });
+  });
+
   it('mutates a form and applies the chosen variation', async () => {
     await call('vectr_create_design', { recipe: 'pulse-bloom', preview: false });
     const before = JSON.stringify(design(await call('vectr_get_design', { design_id: 'd1' })));
