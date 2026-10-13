@@ -58,7 +58,7 @@ const EPS = 1e-9;
 /** The most a ramp or a slant may take of the slab or neck it sits on. */
 const BITE = 0.45;
 /** Generated strips: the mean and least slab length, and the neck length, in units. */
-const MEAN = 6, LEAST = 2, NECK = 2;
+const MEAN = 6, LEAST = 3, NECK = 2;
 /** Row pitch, in units, of an unhurried row: a text line is about this tall. Generated rows have no such limit. */
 const CELL = { pattern: 2.2, text: 2.2, generate: 6 } as const;
 
