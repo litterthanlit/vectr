@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from 'react';
+import { LIMITS } from '@vectr/core';
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -141,6 +142,29 @@ export function TextField({ label, value, placeholder, onChange }: { label: stri
   );
 }
 
+/** Multi-line text, styled like TextField. Capped at the document's text limit. */
+export function TextArea({
+  label, value, placeholder, rows = 3, maxLength = LIMITS.maxText, onChange,
+}: {
+  label: string; value: string; placeholder?: string; rows?: number; maxLength?: number; onChange(v: string): void;
+}) {
+  const id = useId();
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-[13px] text-zinc-300">{label}</label>
+      <textarea
+        id={id}
+        value={value}
+        rows={rows}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="block w-full resize-y rounded-md bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] leading-relaxed text-zinc-200 outline-none ring-1 ring-white/[0.06] placeholder:text-zinc-600 focus:ring-accent/70"
+      />
+    </div>
+  );
+}
+
 export function ColorField({
   label, value, swatches, onChange, allowInherit, inheritLabel = 'Ink',
 }: {
@@ -148,6 +172,8 @@ export function ColorField({
   allowInherit?: boolean; inheritLabel?: string;
 }) {
   const id = useId();
+  // Several colour fields can share a panel, so each control's name says which one it belongs to.
+  const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -159,17 +185,17 @@ export function ColorField({
             type="color"
             value={value ?? swatches[0]}
             onChange={(e) => onChange(e.target.value)}
-            className="h-6 w-6 cursor-pointer rounded-md border-0 bg-transparent p-0"
+            className={`h-6 w-6 cursor-pointer rounded-md border-0 bg-transparent p-0 ${focus}`}
           />
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div role="group" aria-label={`${label} presets`} className="flex flex-wrap gap-1.5">
         {allowInherit && (
           <button
             type="button"
             onClick={() => onChange(null)}
             aria-pressed={value === null}
-            className={`h-6 rounded-md px-2 text-[11px] ring-1 transition ${value === null ? 'bg-white/10 text-white ring-accent/70' : 'text-zinc-400 ring-white/10 hover:text-zinc-200'}`}
+            className={`h-6 rounded-md px-2 text-[11px] ring-1 transition ${focus} ${value === null ? 'bg-white/10 text-white ring-accent/70' : 'text-zinc-400 ring-white/10 hover:text-zinc-200'}`}
           >
             {inheritLabel}
           </button>
@@ -178,9 +204,10 @@ export function ColorField({
           <button
             key={c}
             type="button"
-            aria-label={`Use ${c}`}
+            aria-label={`Use ${c} for ${label}`}
+            aria-pressed={value?.toLowerCase() === c.toLowerCase()}
             onClick={() => onChange(c)}
-            className={`h-6 w-6 rounded-md ring-1 transition hover:scale-110 ${value?.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-accent' : 'ring-white/15'}`}
+            className={`h-6 w-6 rounded-md ring-1 transition hover:scale-110 ${focus} ${value?.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-accent' : 'ring-white/15'}`}
             style={{ background: c }}
           />
         ))}

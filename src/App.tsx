@@ -9,6 +9,7 @@ import { Forms, Library } from './components/LeftPanel';
 import { MutateStrip } from './components/MutateStrip';
 import { RECIPES, accentFrom, decodeDoc } from '@vectr/core';
 import { copySVG, copyShareLink, downloadPNG, downloadProject, downloadSVG } from './lib/export';
+import { isTyping } from './lib/keys';
 import { useStore } from './store';
 
 function Menu({ label, icon, children }: { label: string; icon: ReactNode; children: (close: () => void) => ReactNode }) {
@@ -162,9 +163,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range') return;
-      if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
+      if (isTyping(e)) return;
       const s = useStore.getState();
       const mod = e.metaKey || e.ctrlKey;
       const id = s.selectedId;

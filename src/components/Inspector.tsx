@@ -12,11 +12,17 @@ import { ParamFields } from './ParamFields';
 import { RampEditor, rampCSS } from './RampEditor';
 
 const STYLE_GROUPS: { title: string; keys: string[] }[] = [
-  { title: 'Line', keys: ['width', 'taper', 'taperAmount', 'hidden'] },
+  { title: 'Line', keys: ['width', 'dash', 'taper', 'taperAmount', 'hidden'] },
   { title: 'Colour', keys: ['color', 'colorBy'] },
-  { title: 'Fill & markers', keys: ['fill', 'fillOpacity', 'markers', 'markerSize', 'markerEvery', 'markersByDepth'] },
-  { title: 'Labels & opacity', keys: ['labels', 'labelSize', 'opacity'] },
+  { title: 'Fill & markers', keys: ['fill', 'fillOpacity', 'knockout', 'markers', 'markerSize', 'markerEvery', 'markersByDepth'] },
+  { title: 'Labels & opacity', keys: ['labels', 'labelSize', 'labelFont', 'opacity'] },
 ];
+
+/** Label colour presets: the document ramp, plus an ink and a paper tone that read on most backgrounds. */
+const labelSwatches = (ramp: string[]) => {
+  const seen = new Set<string>();
+  return [...ramp, '#18181b', '#fafafa'].filter((c) => !seen.has(c.toLowerCase()) && seen.add(c.toLowerCase()));
+};
 
 /** A card in the build pipeline: numbered and collapsible; secondary actions live inside. */
 function Card({
@@ -169,11 +175,30 @@ function StyleSections({ form, doc }: { form: Form; doc: Doc }) {
   const values = st as unknown as Record<string, string | number | boolean>;
   const set = (k: string, v: unknown) => updateStyle(form.id, { [k]: v } as Partial<Style>, k);
   const inGroup = (keys: string[]) => (d: ParamDef) => keys.includes(d.key);
+  const fields = (keys: string[]) => <ParamFields defs={STYLE_PARAMS} values={values} only={inGroup(keys)} onChange={set} />;
   return (
     <>
       {STYLE_GROUPS.map((g) => (
         <Section key={g.title} title={g.title}>
-          <ParamFields defs={STYLE_PARAMS} values={values} only={inGroup(g.keys)} onChange={set} />
+          {g.title === 'Labels & opacity' ? (
+            <>
+              {/* The label colour sits with the other label controls, ahead of the form-wide opacity. */}
+              {fields(g.keys.filter((k) => k !== 'opacity'))}
+              {st.labels && (
+                <ColorField
+                  label="Label colour"
+                  value={st.labelColor}
+                  swatches={labelSwatches(doc.ramp)}
+                  allowInherit
+                  inheritLabel="Line colour"
+                  onChange={(c) => set('labelColor', c)}
+                />
+              )}
+              {fields(['opacity'])}
+            </>
+          ) : (
+            fields(g.keys)
+          )}
           {g.title === 'Colour' &&
             (st.color === 'ramp' ? (
               <>

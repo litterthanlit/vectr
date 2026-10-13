@@ -10,15 +10,36 @@ export const SOURCE_STARTERS: Record<string, FormSpec> = {
   lattice: { source: { kind: 'lattice' }, transform: { rx: -55, ry: 0, perspective: 0.3 } },
   points: { source: { kind: 'points' }, style: { markers: 'dot', markerSize: 3 } },
   note: { source: { kind: 'note', params: { text: 'Note' } }, transform: { rx: 0, ry: 0 }, style: { taper: 'none', labelSize: 14 } },
+  orbits: { source: { kind: 'orbits' } },
+  // Cards are always flat: their text stays upright, so a tilted frame would look broken.
+  card: {
+    source: { kind: 'card' },
+    transform: { rx: 0, ry: 0, perspective: 0 },
+    style: { taper: 'none', color: 'solid', fill: 'shapes', fillOpacity: 0.12, knockout: true, labelFont: 'sans', labelSize: 18, width: 1 },
+  },
 };
+
+/** A source added without a starter of its own still gets a tile, rather than crashing the panel. */
+const starterFor = (kind: string): FormSpec => SOURCE_STARTERS[kind] ?? { source: { kind } };
 
 const THUMB_RAMP = ['#52525b', '#a1a1aa', '#fafafa'];
 
+/** Where each source sits in its 100×100 thumbnail. A note's text starts at its origin; a card is centred and small enough to fit. */
+const THUMB_LAYOUT: Record<string, { scale: number; x: number; y: number; labelSize: number }> = {
+  note: { scale: 34, x: 30, y: 66, labelSize: 11 },
+  card: { scale: 28, x: 50, y: 50, labelSize: 7 },
+};
+const THUMB_DEFAULT = { scale: 36, x: 50, y: 50, labelSize: 11 };
+
 const SourceThumb = memo(function SourceThumb({ kind }: { kind: string }) {
   const html = useMemo(() => {
-    const form = createForm(SOURCE_STARTERS[kind], { x: 50, y: 50 });
-    Object.assign(form, { scale: kind === 'note' ? 34 : 36, x: kind === 'note' ? 30 : 50, y: kind === 'note' ? 66 : 50 });
-    form.style = { ...form.style, width: 1, markerSize: 1.3, labelSize: 11 };
+    const { labelSize, ...place } = THUMB_LAYOUT[kind] ?? THUMB_DEFAULT;
+    const form = createForm(starterFor(kind), { x: 50, y: 50 });
+    Object.assign(form, place);
+    // A solid-colour starter would otherwise take the darkest ramp stop and look dim next to the ramped tiles.
+    const stroke = form.style.color === 'solid' ? form.style.stroke ?? THUMB_RAMP[1] : form.style.stroke;
+    form.style = { ...form.style, width: 1, markerSize: 1.3, labelSize, stroke };
+    // No paper: a thumbnail sits on its tile, so knockout fills are left see-through.
     return formToSVG(form, renderForm(form, THUMB_RAMP));
   }, [kind]);
   return <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -41,12 +62,12 @@ export function Library({ onAdd }: { onAdd?(): void }) {
   return (
     <div className="px-3 pt-4 pb-2">
       <h2 className={heading}>Sources</h2>
-      <ul className="grid grid-cols-4 gap-1.5">
+      <ul className="grid grid-cols-3 gap-1.5">
         {SOURCES.map((s) => (
           <li key={s.kind}>
             <button
               type="button"
-              onClick={() => { addForm(SOURCE_STARTERS[s.kind]); onAdd?.(); }}
+              onClick={() => { addForm(starterFor(s.kind)); onAdd?.(); }}
               title={s.blurb}
               aria-label={`Add ${s.name}: ${s.blurb}`}
               className="group flex w-full flex-col items-center gap-1 rounded-xl p-1 text-zinc-400 ring-1 ring-transparent transition hover:bg-white/[0.04] hover:text-zinc-100 hover:ring-white/[0.08] focus-visible:outline-2 focus-visible:outline-accent"

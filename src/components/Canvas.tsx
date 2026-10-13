@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { renderForm, renderFormCached, type RenderedForm } from '@vectr/core';
+import { isTyping } from '../lib/keys';
 import { useStore } from '../store';
 import { ArtboardContent } from './Artboard';
 
@@ -51,7 +52,7 @@ export function Canvas({ view, setView }: { view: CanvasView; setView(v: CanvasV
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !(e.target instanceof HTMLInputElement)) {
+      if (e.code === 'Space' && !isTyping(e)) {
         spaceDown.current = true;
         setPanning(true);
       }
