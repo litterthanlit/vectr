@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from 'react';
+import { LIMITS } from '@vectr/core';
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -34,7 +35,7 @@ export function Slider({
       <label htmlFor={id} className="text-[13px] text-zinc-300">{label}</label>
       <input
         aria-label={`${label} value`}
-        className="w-16 rounded-md bg-white/[0.04] px-2 py-1 text-right font-mono text-[12px] text-zinc-200 outline-none ring-1 ring-white/[0.06] focus:ring-orange-400/70"
+        className="w-16 rounded-md bg-white/[0.04] px-2 py-1 text-right font-mono text-[12px] text-zinc-200 outline-none ring-1 ring-white/[0.06] focus:ring-accent/70"
         value={draft ?? `${value.toFixed(decimals)}${unit ?? ''}`}
         onFocus={(e) => { setDraft(value.toFixed(decimals)); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value)}
@@ -69,7 +70,7 @@ export function Toggle({ label, checked, onChange }: { label: string; checked: b
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400 ${checked ? 'bg-orange-500' : 'bg-white/10'}`}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${checked ? 'bg-accent' : 'bg-white/10'}`}
       >
         <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-4' : ''}`} />
       </button>
@@ -88,7 +89,7 @@ export function Select({
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="min-w-0 max-w-[60%] rounded-md bg-white/[0.04] px-2 py-1.5 text-[13px] text-zinc-200 outline-none ring-1 ring-white/[0.06] focus:ring-orange-400/70"
+        className="min-w-0 max-w-[60%] rounded-md bg-white/[0.04] px-2 py-1.5 text-[13px] text-zinc-200 outline-none ring-1 ring-white/[0.06] focus:ring-accent/70"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value} className="bg-zinc-900">{o.label}</option>
@@ -113,7 +114,7 @@ export function Segmented<T extends string>({
             aria-checked={value === o.value}
             title={o.label}
             onClick={() => onChange(o.value)}
-            className={`flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-orange-400 ${
+            className={`flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
               value === o.value ? 'bg-white/10 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
@@ -125,7 +126,11 @@ export function Segmented<T extends string>({
   );
 }
 
-export function TextField({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange(v: string): void }) {
+export function TextField({
+  label, value, placeholder, maxLength = LIMITS.maxText, onChange,
+}: {
+  label: string; value: string; placeholder?: string; maxLength?: number; onChange(v: string): void;
+}) {
   const id = useId();
   return (
     <div className="space-y-1.5">
@@ -133,9 +138,33 @@ export function TextField({ label, value, placeholder, onChange }: { label: stri
       <input
         id={id}
         value={value}
+        maxLength={maxLength}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none ring-1 ring-white/[0.06] placeholder:text-zinc-600 focus:ring-orange-400/70"
+        className="w-full rounded-md bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none ring-1 ring-white/[0.06] placeholder:text-zinc-600 focus:ring-accent/70"
+      />
+    </div>
+  );
+}
+
+/** Multi-line text, styled like TextField. Capped at the document's text limit. */
+export function TextArea({
+  label, value, placeholder, rows = 3, maxLength = LIMITS.maxText, onChange,
+}: {
+  label: string; value: string; placeholder?: string; rows?: number; maxLength?: number; onChange(v: string): void;
+}) {
+  const id = useId();
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-[13px] text-zinc-300">{label}</label>
+      <textarea
+        id={id}
+        value={value}
+        rows={rows}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="block w-full resize-y rounded-md bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] leading-relaxed text-zinc-200 outline-none ring-1 ring-white/[0.06] placeholder:text-zinc-600 focus:ring-accent/70"
       />
     </div>
   );
@@ -148,6 +177,8 @@ export function ColorField({
   allowInherit?: boolean; inheritLabel?: string;
 }) {
   const id = useId();
+  // Several colour fields can share a panel, so each control's name says which one it belongs to.
+  const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -159,17 +190,17 @@ export function ColorField({
             type="color"
             value={value ?? swatches[0]}
             onChange={(e) => onChange(e.target.value)}
-            className="h-6 w-6 cursor-pointer rounded-md border-0 bg-transparent p-0"
+            className={`h-6 w-6 cursor-pointer rounded-md border-0 bg-transparent p-0 ${focus}`}
           />
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div role="group" aria-label={`${label} presets`} className="flex flex-wrap gap-1.5">
         {allowInherit && (
           <button
             type="button"
             onClick={() => onChange(null)}
             aria-pressed={value === null}
-            className={`h-6 rounded-md px-2 text-[11px] ring-1 transition ${value === null ? 'bg-white/10 text-white ring-orange-400/70' : 'text-zinc-400 ring-white/10 hover:text-zinc-200'}`}
+            className={`h-6 rounded-md px-2 text-[11px] ring-1 transition ${focus} ${value === null ? 'bg-white/10 text-white ring-accent/70' : 'text-zinc-400 ring-white/10 hover:text-zinc-200'}`}
           >
             {inheritLabel}
           </button>
@@ -178,9 +209,10 @@ export function ColorField({
           <button
             key={c}
             type="button"
-            aria-label={`Use ${c}`}
+            aria-label={`Use ${c} for ${label}`}
+            aria-pressed={value?.toLowerCase() === c.toLowerCase()}
             onClick={() => onChange(c)}
-            className={`h-6 w-6 rounded-md ring-1 transition hover:scale-110 ${value?.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-orange-400' : 'ring-white/15'}`}
+            className={`h-6 w-6 rounded-md ring-1 transition hover:scale-110 ${focus} ${value?.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-accent' : 'ring-white/15'}`}
             style={{ background: c }}
           />
         ))}
@@ -202,7 +234,7 @@ export function IconButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-1.5 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-orange-400 disabled:pointer-events-none disabled:opacity-30 ${
+      className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-1.5 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-30 ${
         active ? 'bg-white/10 text-white' : ''
       } ${className}`}
     >
