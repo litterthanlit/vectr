@@ -1,3 +1,4 @@
+import { finishFilter, type Box } from './finish.js';
 import { LABEL_LEADING, labelDy0, renderForm, type ProjectedLabel, type RenderedForm } from './render.js';
 import type { Doc, Form, LabelFont } from './types.js';
 
@@ -32,11 +33,15 @@ function dash(pattern: string | undefined, width: number): string {
 
 /**
  * Markup for one form (a `<g>`), from an already-projected render. `paper` is the
- * document background, painted under knockout fills; thumbnails omit it.
+ * document background, painted under knockout fills; thumbnails omit it. `view` is the
+ * visible area (the artboard), which keeps a finish's filter from working off-canvas.
  */
-export function formToSVG(form: Form, r: RenderedForm, paper?: string): string {
+export function formToSVG(form: Form, r: RenderedForm, paper?: string, view?: Box): string {
   const st = form.style;
   const out: string[] = [`<g opacity="${n(st.opacity)}">`];
+  // A finish filters an inner group, so the form's opacity still applies to the finished result.
+  const fin = finishFilter(st, r.bbox, view);
+  if (fin) out.push(fin.defs, `<g filter="url(#${fin.id})">`);
   const knock = st.knockout && paper ? esc(paper) : '';
   for (const fl of r.fills) {
     if (knock) out.push(`<path d="${fl.d}" fill="${knock}" stroke="none"/>`);
@@ -62,6 +67,7 @@ export function formToSVG(form: Form, r: RenderedForm, paper?: string): string {
     for (const l of r.labels) out.push(labelToSVG(l));
     out.push('</g>');
   }
+  if (fin) out.push('</g>');
   out.push('</g>');
   return out.join('');
 }
@@ -101,7 +107,7 @@ export function roughFilterSVG(rough: number): string {
 export function docToSVG(doc: Doc, rendered?: Map<string, RenderedForm>): string {
   const body = doc.forms
     .filter((f) => f.visible)
-    .map((f) => formToSVG(f, rendered?.get(f.id) ?? renderForm(f, doc.ramp), doc.background))
+    .map((f) => formToSVG(f, rendered?.get(f.id) ?? renderForm(f, doc.ramp), doc.background, { x: 0, y: 0, w: doc.width, h: doc.height }))
     .join('');
   const filter = doc.rough > 0 ? ` filter="url(#${ROUGH_FILTER_ID})"` : '';
   return (

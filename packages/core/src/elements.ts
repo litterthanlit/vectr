@@ -1,4 +1,5 @@
 import { DEFAULT_TRANSFORM, createForm, type FormSpec } from './forms.js';
+import { DEFAULT_STYLE, STYLE_PARAMS } from './style.js';
 import type { Form, Params, Style, Transform } from './types.js';
 
 /** One form of an element, with its position as an offset from the artboard centre. */
@@ -23,6 +24,12 @@ export const ELEMENT_ARTBOARD = 1000;
 // strongest, and a flat form (a dial, a card) the ramp's last stop, so each adapts to whatever theme the document uses.
 const hair: Partial<Style> = { width: 0.9, taper: 'none', color: 'ramp', colorBy: 'depth' };
 const flat: Partial<Transform> = { rx: 0, ry: 0, rz: 0, perspective: 0 };
+
+// The attention element draws one token field twice, as dots and as the points threads leave from, so both share these.
+const ATTENTION_FIELD = { layout: 'window', mark: 'dot', tokens: 700, rows: 40, relevant: 0.12, seed: 5 };
+const ATTENTION_SCALE = 330;
+/** How far above and below the field's middle the two foci sit, in the field's unit space. */
+const ATTENTION_FOCUS = 1.38;
 
 export const ELEMENTS: Element[] = [
   {
@@ -227,15 +234,112 @@ export const ELEMENTS: Element[] = [
       },
     ],
   },
+  {
+    id: 'context-window',
+    name: 'Context window',
+    blurb: 'A burst of solid token blocks, dense at the core and thinning outward, the few relevant ones picked out by colour',
+    forms: [{
+      name: 'Context window',
+      source: { kind: 'context', params: { layout: 'burst', tokens: 1800, rows: 84, falloff: 0.55, relevant: 0.08, height: 0.78, seed: 12 } },
+      style: { ...hair, width: 0.4, colorBy: 'family', fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 470, ...flat },
+    }],
+  },
+  {
+    id: 'attention',
+    name: 'Attention',
+    blurb: 'A field of token dots with dotted threads from the relevant ones converging above and below on two rings of focus',
+    forms: [
+      {
+        name: 'Token field',
+        source: { kind: 'context', params: ATTENTION_FIELD },
+        style: { ...hair, colorBy: 'family', markers: 'dot', markerSize: 2.8, markersByDepth: false },
+        transform: { scale: ATTENTION_SCALE, ...flat },
+      },
+      {
+        name: 'Attention threads',
+        source: { kind: 'context', params: ATTENTION_FIELD },
+        ops: [{ kind: 'connect', params: { mode: 'focus', fx: 0, fy: ATTENTION_FOCUS, fz: 0, split: true, which: 'relevant', bow: 0.1, keepLines: false, seed: 5 } }],
+        style: { ...hair, width: 1.1, colorBy: 'family', dash: 'dotted' },
+        transform: { scale: ATTENTION_SCALE, ...flat },
+      },
+      ...[-1, 1].map((side): ElementForm => ({
+        name: side < 0 ? 'Upper focus' : 'Lower focus',
+        source: { kind: 'note', params: { text: '', length: 0, elbow: 0 } },
+        style: { ...hair, width: 1.6, markers: 'ring', markerSize: 7, markersByDepth: false },
+        transform: { scale: 100, ...flat },
+        offset: { x: 0, y: side * ATTENTION_FOCUS * ATTENTION_SCALE },
+      })),
+    ],
+  },
+  {
+    id: 'strip-field',
+    name: 'Strip field',
+    blurb: 'Rows of hyphenated slabs joined by necks and broken by gaps, like context read as ribbons, the few relevant slabs picked out by colour',
+    forms: [{
+      name: 'Strip field',
+      source: { kind: 'strip', params: { mode: 'generate', rows: 14, segments: 6, relevant: 0.12, seed: 8, aspect: 1, height: 0.68 } },
+      style: { ...hair, width: 0.5, colorBy: 'family', fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 420, ...flat },
+    }],
+  },
+  {
+    id: 'memory-burst',
+    name: 'Memory burst',
+    blurb: 'Working memory blown apart: a dense core of slanted token blocks fused into ink, tearing into streaks and spray, the relevant ones in the accent',
+    forms: [{
+      name: 'Memory burst',
+      // A burst-layout field is already dense at its core and thin at its edge, so the operator only has to throw it outward.
+      // The ink finish needs solid fills, and the spray droplets (the form's only points) are drawn as big dots that survive it.
+      source: {
+        kind: 'context',
+        params: { layout: 'burst', tokens: 2000, rows: 56, falloff: 0.4, aspect: 1, variance: 0.8, height: 0.9, relevant: 0.14, cut: 'slant', cutAngle: 24, seed: 3 },
+      },
+      ops: [{ kind: 'burst', params: { mode: 'radial', shatter: 3, spray: 340, keepPoints: false, seed: 3 } }],
+      style: {
+        ...hair, width: 0.5, colorBy: 'family', fill: 'shapes', fillOpacity: 1,
+        markers: 'dot', markerSize: 8, markersByDepth: true, finish: 'ink',
+      },
+      transform: { scale: 380, ...flat },
+    }],
+  },
+  {
+    id: 'linked-mark',
+    name: 'Linked mark',
+    blurb: 'A bold mark of two slabs joined by a thin neck: a vertical step on top, a 30° ramp below, and the second slab cut on a slant',
+    forms: [{
+      name: 'Linked mark',
+      source: {
+        kind: 'strip',
+        params: {
+          mode: 'pattern', pattern: '####--######', height: 0.7, neck: 0.5, neckAlign: 'center', ramp: 30, rampEdge: 'bottom', corner: 0.08,
+          startEnd: 'square', finishEnd: 'slant', slant: 18, aspect: 1.6,
+        },
+      },
+      style: { ...hair, width: 0.8, fill: 'shapes', fillOpacity: 1 },
+      transform: { scale: 330, ...flat },
+    }],
+  },
 ];
 
 /** The artboard-relative scale for a document: elements grow and shrink with its shorter side. */
 export const elementScale = (width: number, height: number) => Math.min(width, height) / ELEMENT_ARTBOARD;
 
-/** A form's spec with its scale, offset and label size multiplied by k. */
-function scaled(spec: ElementForm, k: number): { spec: FormSpec; offset: { x: number; y: number } } {
+/** The smallest finish scale a document may hold (a finish can be drawn smaller than this, but not stored smaller). */
+const FINISH_SCALE_MIN = (STYLE_PARAMS.find((d) => d.key === 'finishScale') as { min: number }).min;
+
+/**
+ * A form's spec with its scale, offset, label size and finish scale multiplied by k. A finish is sized in pixels like a
+ * label, so it has to shrink and grow with the drawing or a small element would be all bleed. `minFinish` keeps what is
+ * stored in a document within the style's range; a thumbnail, which is never stored, passes none.
+ */
+function scaled(spec: ElementForm, k: number, minFinish = 0): { spec: FormSpec; offset: { x: number; y: number } } {
   const { offset, ...rest } = spec;
-  const style = rest.style?.labelSize !== undefined ? { ...rest.style, labelSize: rest.style.labelSize * k } : rest.style;
+  let style = rest.style;
+  if (style?.labelSize !== undefined) style = { ...style, labelSize: style.labelSize * k };
+  if (style?.finish && style.finish !== 'clean' && k !== 1) {
+    style = { ...style, finishScale: Math.max(minFinish, (style.finishScale ?? DEFAULT_STYLE.finishScale) * k) };
+  }
   const transform = { ...rest.transform, scale: (rest.transform?.scale ?? DEFAULT_TRANSFORM.scale) * k };
   return { spec: { ...rest, style, transform }, offset: { x: (offset?.x ?? 0) * k, y: (offset?.y ?? 0) * k } };
 }
@@ -257,7 +361,7 @@ export function placeElement(element: Element, width: number, height: number): F
 export function elementDocForms(element: Element, width = ELEMENT_ARTBOARD, height = ELEMENT_ARTBOARD) {
   const k = elementScale(width, height);
   return element.forms.map((f) => {
-    const { spec, offset } = scaled(f, k);
+    const { spec, offset } = scaled(f, k, FINISH_SCALE_MIN);
     const t = { ...DEFAULT_TRANSFORM, ...spec.transform };
     const out: Record<string, unknown> = {
       ...(spec.name ? { name: spec.name } : {}),

@@ -26,11 +26,16 @@ export const DEFAULT_STYLE: Style = {
   labelFont: 'mono',
   labelColor: null,
   opacity: 1,
+  finish: 'clean',
+  finishAmount: 0.5,
+  finishScale: 1,
+  finishSeed: 1,
 };
 
 const opt = (...v: string[]) => v.map((x) => ({ value: x, label: x[0].toUpperCase() + x.slice(1) }));
 
 const FILLED = { key: 'fill', in: ['ribbons', 'shapes'] };
+const FINISHED = { key: 'finish', in: ['ink', 'grain', 'rough'] };
 
 /** Schema for the scalar style fields (colours — stroke, ramp, labelColor — are validated separately). */
 export const STYLE_PARAMS: ParamDef[] = [
@@ -51,6 +56,13 @@ export const STYLE_PARAMS: ParamDef[] = [
   { key: 'markerSize', label: 'Marker size', kind: 'range', min: 0.5, max: 24, step: 0.1, when: { key: 'markers', in: ['dot', 'ring', 'cross', 'tick'] } },
   { key: 'markerEvery', label: 'Every nth point', kind: 'range', min: 1, max: 12, step: 1, when: { key: 'markers', in: ['dot', 'ring', 'cross', 'tick'] } },
   { key: 'markersByDepth', label: 'Size markers by depth', kind: 'toggle', when: { key: 'markers', in: ['dot', 'ring', 'cross', 'tick'] } },
+  {
+    key: 'finish', label: 'Finish', kind: 'select', options: opt('clean', 'ink', 'grain', 'rough'),
+    help: 'A material for the whole form. Ink fuses close pieces into solid ink with torn edges (best on solid fills, fill opacity 1), grain speckles it like dry brush, rough wobbles the edges',
+  },
+  { key: 'finishAmount', label: 'Finish amount', kind: 'range', min: 0, max: 1, step: 0.01, when: FINISHED },
+  { key: 'finishScale', label: 'Finish scale', kind: 'range', min: 0.2, max: 4, step: 0.05, when: FINISHED, help: 'Size of the bleed, speckle or wobble. 1 suits an artboard 1000 to 1600 px wide' },
+  { key: 'finishSeed', label: 'Finish seed', kind: 'seed', when: FINISHED },
   { key: 'labels', label: 'Labels', kind: 'toggle' },
   { key: 'labelSize', label: 'Label size', kind: 'range', min: 4, max: 96, step: 0.5 },
   { key: 'labelFont', label: 'Label font', kind: 'select', options: opt('mono', 'sans', 'serif') },

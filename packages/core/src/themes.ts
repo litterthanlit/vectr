@@ -14,6 +14,10 @@ export const THEMES: Theme[] = [
   { id: 'bloom', name: 'Bloom', background: '#fff8f3', ramp: ['#ffc9b3', '#ff5c6c', '#a3106e'] },
   // Neutral paper-white with cool zinc greys: the instrument-plate look, where depth is only ever grey.
   { id: 'fog', name: 'Fog', background: '#f6f6f7', ramp: ['#cfcfd4', '#9a9aa3', '#2c2c32'] },
+  // Deep blue with white and a light blue: the first stop is the body of a form and the last its accent, so colouring
+  // by family puts the relevant pieces in light blue on white. Unlike the other dark themes the ramp does not dim with
+  // depth: a flat form takes the last stop and a tilted one runs from white (far) to light blue (near).
+  { id: 'deep', name: 'Deep', background: '#0b4a78', ramp: ['#ffffff', '#cfe4ff', '#7fb8ff'] },
 ];
 
 export const themeFor = (id: string) => THEMES.find((t) => t.id === id);

@@ -9,6 +9,9 @@ type Strength = 'subtle' | 'medium' | 'wild';
 const STRENGTH: Record<Strength, number> = { subtle: 0.12, medium: 0.3, wild: 0.65 };
 const COUNT = 6;
 const THUMB_PX = 130;
+/** On a finished form, how much of the usual thumbnail enlargement its dots get, and the finish's floor in artboard px per screen px. */
+const FINISH_DOTS = 0.25;
+const FINISH_FLOOR = 0.2;
 
 /** A variation drawn on its own, framed to its bounding box. */
 const Variant = memo(function Variant({ form, ramp, background }: { form: Form; ramp: string[]; background: string }) {
@@ -20,8 +23,15 @@ const Variant = memo(function Variant({ form, ramp, background }: { form: Form; 
     // The thumbnail shrinks the form to ~130px, so thicken strokes to stay legible.
     const k = Math.max(1, (side / THUMB_PX) * 0.9);
     const thick: Form = { ...form, style: { ...form.style, width: form.style.width * k, markerSize: form.style.markerSize * k } };
-    // The background is the paper knockout fills are painted with, as on the artboard.
-    return { html: formToSVG(thick, renderForm(thick, ramp), background), box: `${cx - side / 2} ${cy - side / 2} ${side} ${side}` };
+    if (form.style.finish !== 'clean') {
+      // A finished form is a mass of ink: fattened outlines would clot it into one blob, so only the dots (the spray) are enlarged.
+      // The finish is sized in artboard pixels and is kept to about a screen pixel's worth, or it fuses and roughens nothing.
+      thick.style = { ...thick.style, width: form.style.width, markerSize: form.style.markerSize * k * FINISH_DOTS, finishScale: Math.max(form.style.finishScale, k * FINISH_FLOOR) };
+    }
+    // The background is the paper knockout fills are painted with, as on the artboard. The view is the thumbnail's own frame,
+    // not the artboard: the frame is what a finish's filter has to cover.
+    const frame = { x: cx - side / 2, y: cy - side / 2, w: side, h: side };
+    return { html: formToSVG(thick, renderForm(thick, ramp), background, frame), box: `${frame.x} ${frame.y} ${side} ${side}` };
   }, [form, ramp, background]);
   return (
     <svg viewBox={box} className="h-full w-full" style={{ background }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />

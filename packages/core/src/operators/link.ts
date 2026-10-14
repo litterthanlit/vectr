@@ -1,5 +1,5 @@
 import { circle } from '../math.js';
-import { bool, int, num, rng, str } from '../math.js';
+import { bool, clamp, int, num, rng, str } from '../math.js';
 import type { GeoNode, OpDef, Polyline, Vec3 } from '../types.js';
 
 const MAX_NODES = 1500;
@@ -21,6 +21,8 @@ function anchors(g: { lines: Polyline[]; nodes: GeoNode[] }): GeoNode[] {
   return list;
 }
 
+const FOCUS = { key: 'mode', in: ['focus'] };
+
 const d2 = (a: Vec3, b: Vec3) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
 
 export const connect: OpDef = {
@@ -30,15 +32,29 @@ export const connect: OpDef = {
   params: [
     {
       key: 'mode', label: 'Link', kind: 'select',
-      options: [{ value: 'nearest', label: 'Nearest neighbours' }, { value: 'within', label: 'Within distance' }, { value: 'sequence', label: 'In order' }, { value: 'hub', label: 'To the centre' }],
+      options: [
+        { value: 'nearest', label: 'Nearest neighbours' }, { value: 'within', label: 'Within distance' }, { value: 'sequence', label: 'In order' },
+        { value: 'hub', label: 'To the centre' }, { value: 'focus', label: 'To a point' },
+      ],
     },
     { key: 'k', label: 'Neighbours', kind: 'range', min: 1, max: 8, step: 1, when: { key: 'mode', in: ['nearest'] } },
     { key: 'distance', label: 'Distance', kind: 'range', min: 0.02, max: 2, step: 0.01, when: { key: 'mode', in: ['within'] } },
+    { key: 'fx', label: 'Focus X', kind: 'range', min: -3, max: 3, step: 0.01, when: FOCUS },
+    { key: 'fy', label: 'Focus Y', kind: 'range', min: -3, max: 3, step: 0.01, when: FOCUS },
+    { key: 'fz', label: 'Focus Z', kind: 'range', min: -3, max: 3, step: 0.01, when: FOCUS },
+    { key: 'split', label: 'Split', kind: 'toggle', when: FOCUS, help: 'Points below the middle converge on the mirrored focus, so fans open above and below' },
+    {
+      key: 'which', label: 'Threads from', kind: 'select', when: FOCUS,
+      options: [{ value: 'all', label: 'Every point' }, { value: 'relevant', label: 'Relevant points' }, { value: 'share', label: 'A share of points' }],
+      help: 'Relevant points are family 1, as the context source marks them',
+    },
+    { key: 'share', label: 'Share', kind: 'range', min: 0, max: 1, step: 0.01, when: FOCUS, help: 'With "A share of points": the fraction that get a thread' },
+    { key: 'seed', label: 'Seed', kind: 'seed', when: FOCUS },
     { key: 'bow', label: 'Bow', kind: 'range', min: -1, max: 1, step: 0.01, help: 'Curve links outward (+) or inward (−)' },
     { key: 'keepLines', label: 'Keep lines', kind: 'toggle' },
     { key: 'maxLinks', label: 'Max links', kind: 'range', min: 10, max: 4000, step: 10 },
   ],
-  defaults: { mode: 'nearest', k: 3, distance: 0.4, bow: 0, keepLines: true, maxLinks: 1500 },
+  defaults: { mode: 'nearest', k: 3, distance: 0.4, fx: 0, fy: 1.2, fz: 0, split: false, which: 'all', share: 1, seed: 3, bow: 0, keepLines: true, maxLinks: 1500 },
   apply(g, p) {
     const list = anchors(g);
     const mode = str(p, 'mode'), bow = num(p, 'bow'), max = int(p, 'maxLinks');
@@ -82,6 +98,25 @@ export const connect: OpDef = {
     if (mode === 'hub') {
       const c = list.reduce<Vec3>((s, n) => [s[0] + n.p[0] / list.length, s[1] + n.p[1] / list.length, s[2] + n.p[2] / list.length], [0, 0, 0]);
       list.slice(0, max).forEach((n) => lines.push({ pts: curve(c, n.p), t: [0, n.t ?? 1], family: n.family }));
+    }
+    if (mode === 'focus') {
+      // Threads converge on a chosen point, like attention. With `split`, points below the middle go to the mirror image of the focus.
+      const [fx, fy, fz] = [num(p, 'fx'), num(p, 'fy'), num(p, 'fz')].map((v) => clamp(v || 0, -3, 3));
+      const [top, bottom]: Vec3[] = [[fx, fy, fz], [fx, bool(p, 'split') ? -fy : fy, fz]];
+      const which = str(p, 'which'), share = clamp(num(p, 'share') || 0, 0, 1);
+      const r = rng(int(p, 'seed'));
+      // One roll per point whatever `which` is, so choosing a share does not reshuffle the seed for others.
+      const chosen = list.filter((n) => {
+        const roll = r();
+        return which === 'relevant' ? (n.family ?? 0) >= 1 : which === 'share' ? roll < share : true;
+      });
+      // Past maxLinks, thin evenly rather than keeping only the first points.
+      const stride = Math.max(1, chosen.length / Math.max(1, max));
+      for (let i = 0; i < Math.min(chosen.length, max); i++) {
+        const n = chosen[Math.floor(i * stride)];
+        const pts = curve(n.p, n.p[1] < 0 ? bottom : top);
+        lines.push({ pts, t: pts.map((_, k) => k / Math.max(1, pts.length - 1)), family: n.family });
+      }
     }
     return { lines, nodes: g.nodes, labels: g.labels };
   },

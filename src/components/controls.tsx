@@ -126,7 +126,11 @@ export function Segmented<T extends string>({
   );
 }
 
-export function TextField({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange(v: string): void }) {
+export function TextField({
+  label, value, placeholder, maxLength = LIMITS.maxText, onChange,
+}: {
+  label: string; value: string; placeholder?: string; maxLength?: number; onChange(v: string): void;
+}) {
   const id = useId();
   return (
     <div className="space-y-1.5">
@@ -134,6 +138,7 @@ export function TextField({ label, value, placeholder, onChange }: { label: stri
       <input
         id={id}
         value={value}
+        maxLength={maxLength}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md bg-white/[0.04] px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none ring-1 ring-white/[0.06] placeholder:text-zinc-600 focus:ring-accent/70"

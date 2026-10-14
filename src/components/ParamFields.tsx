@@ -36,7 +36,7 @@ export function ParamFields({
             return <Select key={d.key} label={d.label} value={String(v)} options={d.options} onChange={(x) => onChange(d.key, x)} />;
           case 'text': {
             const Field = d.multiline ? TextArea : TextField;
-            return <Field key={d.key} label={d.label} value={String(v ?? '')} placeholder={d.placeholder} onChange={(x) => onChange(d.key, x)} />;
+            return <Field key={d.key} label={d.label} value={String(v ?? '')} placeholder={d.placeholder} maxLength={d.maxLength} onChange={(x) => onChange(d.key, x)} />;
           }
           case 'seed':
             return (

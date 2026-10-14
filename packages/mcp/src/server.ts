@@ -36,6 +36,9 @@ Tips:
 - Beaded globe: curve arc (start -90, sweep 180) → revolve → resample (mode dots, keepLines true), style markers "dot".
 - Dials and rulers: a circle or line → ticks (majorEvery for long marks, vary "wave" for rhythm), flat (rx 0, ry 0, perspective 0).
 - Use the orbits source for orbital shells and gimbals, and the card source for captions (multi-line text that wraps to the card).
+- Context (what an agent sees): the context source makes a field of token blocks, from pasted text (each word a block, highlight words relevant) or generated (layout window, burst or radial). Blocks need style fill "shapes"; colorBy "family" with a 2-stop ramp, grey then an accent, lights up the relevant tokens. Attention is connect mode "focus" (threads from the tokens to fx, fy, fz; split gives fans above and below, which "relevant" threads only the relevant tokens). Tilt with ry and perspective for a stream.
+- Strips (context as hyphenated ribbons): the strip source draws rows of slabs joined by thinner necks, from a pattern (mode "pattern": '#' slab, '-' neck, space or '.' gap, a new line a new row), generated rows (mode "generate") or pasted text (mode "text": a word is a slab, a space a neck, a sentence end a gap). Use style fill "shapes"; colorBy "family" with a 2-stop ramp, grey then an accent, colours the relevant slabs. For attention add connect mode "focus" with which "relevant". ramp, neckAlign, startEnd and finishEnd (square, slant, round) shape the joints and ends.
+- Bursts and finishes (explosions of ink): the burst operator blows any form apart from a centre (mode "radial", or "horizontal" for level bars; core is the intact radius, strength, stretch, scatter and jitter shape the throw, shatter cuts each closed shape into slices, spray adds droplet points, keepPoints false leaves only the spray, drawn with style markers "dot"). Style finish "ink" fuses close pieces into solid ink with torn edges and needs fill "shapes" with fillOpacity 1; "grain" speckles like dry brush; "rough" wobbles the edges; finishAmount, finishScale (1 suits a 1000 to 1600 px artboard) and finishSeed tune it. The memory-burst element is this look ready-made (it suits the deep theme). Ink PNG previews are slower at large preview widths (about 3 s at 1200 px), so iterate at a smaller width.
 - Cards: ALWAYS keep them flat (rx 0, ry 0, perspective 0), set style fill "shapes" with knockout true to hide the lines behind, and labelFont "sans". labelColor sets the colour of text and card icons.
 - Line weight is per form, so layer several forms for hierarchy: a thick limb or bezel with a hairline grid, graduations or dotted rings on top.
 - Elements (${ELEMENT_IDS.join(', ')}) are ready-made multi-form pieces: add_elements: [{ "id": "dial", "x": 400, "y": 450, "size": 0.6 }] places one scaled to the artboard (size multiplies it, default 1; centred unless x, y are given). Then refine its forms with update_forms.
@@ -96,6 +99,10 @@ const StyleInput = z
     labelFont: styleEnum('labelFont').optional().describe('Label typeface: mono, sans or serif'),
     labelColor: z.string().nullable().optional().describe('Colour (hex) of labels and card icons; null = colour of the nearest lines'),
     opacity: z.number().optional(),
+    finish: styleEnum('finish').optional().describe('A material for the whole form: ink fuses nearby pieces into solid ink with torn edges and spatter, grain speckles it like dry brush or print, rough wobbles the edges. Default clean'),
+    finishAmount: z.number().optional().describe('0–1, how strongly the finish works'),
+    finishScale: z.number().optional().describe('0.2–4, the size of the finish features; 1 suits an artboard 1000 to 1600 px wide'),
+    finishSeed: z.number().optional().describe('1–999'),
   })
   .loose();
 

@@ -6,17 +6,11 @@ import {
   ARTBOARD_SIZES, MAX_OPS, OPERATORS, STYLE_PARAMS, THEMES, opFor, sourceFor,
   type Doc, type Form, type Op, type ParamDef, type Style,
 } from '@vectr/core';
+import { STYLE_GROUPS } from '../lib/styleGroups';
 import { selectedForm, useStore } from '../store';
 import { ColorField, IconButton, Section, Slider, Toggle } from './controls';
 import { ParamFields } from './ParamFields';
 import { RampEditor, rampCSS } from './RampEditor';
-
-const STYLE_GROUPS: { title: string; keys: string[] }[] = [
-  { title: 'Line', keys: ['width', 'dash', 'taper', 'taperAmount', 'hidden'] },
-  { title: 'Colour', keys: ['color', 'colorBy'] },
-  { title: 'Fill & markers', keys: ['fill', 'fillOpacity', 'knockout', 'markers', 'markerSize', 'markerEvery', 'markersByDepth'] },
-  { title: 'Labels & opacity', keys: ['labels', 'labelSize', 'labelFont', 'opacity'] },
-];
 
 /** Label colour presets: the document ramp, plus an ink and a paper tone that read on most backgrounds. */
 const labelSwatches = (ramp: string[]) => {
@@ -278,7 +272,8 @@ function DocInspector() {
         </p>
       </div>
       <Section title="Theme">
-        <div className="grid grid-cols-6 gap-1.5">
+        {/* One column per theme, so the row stays a single line however many themes there are. */}
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${THEMES.length}, minmax(0, 1fr))` }}>
           {THEMES.map((t) => {
             const active = doc.background === t.background && doc.ramp.join() === t.ramp.join();
             return (

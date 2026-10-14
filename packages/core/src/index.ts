@@ -16,6 +16,7 @@ export {
   COLOR_LEVELS, LABEL_LEADING, TAPER_LEVELS, cleanText, labelDy0, projector, renderForm, renderFormCached, textWidth, wrapText,
 } from './render.js';
 export type { FillBucket, MarkerBucket, ProjectedLabel, Projector, RenderedForm, StrokeBucket } from './render.js';
+export { FINISHES, FINISH_ID_PREFIX, finishFilter, type Box } from './finish.js';
 export { LABEL_FONT, LABEL_FONTS, ROUGH_FILTER_ID, docToSVG, esc, formToSVG, roughFilterSVG } from './svg.js';
 export { ARTBOARD_SIZES, THEMES, themeFor, type Theme } from './themes.js';
 export { RECIPES, type Recipe } from './recipes.js';

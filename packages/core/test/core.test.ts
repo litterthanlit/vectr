@@ -210,6 +210,123 @@ describe('elements', () => {
     expect(describeBlocks().elementsNote).toMatch(/1000/);
   });
 
+  it('ships the context window: a flat burst of solid blocks coloured by relevance', () => {
+    const element = ELEMENTS.find((e) => e.id === 'context-window')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'context', params: { layout: 'burst', mark: 'block' } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp' });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(g.lines.length).toBeGreaterThan(400);
+    expect(g.nodes.some((n) => n.family === 1) && g.nodes.some((n) => n.family === 0)).toBe(true);
+    // Solid blocks: both colour families of fill show up when rendered.
+    expect(renderForm(form, DOC.ramp).fills).toHaveLength(2);
+  });
+
+  it('ships attention: one token field as dots, threads from the same field to two foci, and a ring at each', () => {
+    const element = ELEMENTS.find((e) => e.id === 'attention')!;
+    const forms = placeElement(element, 1000, 1000);
+    const [field, threads, ...rings] = forms;
+    expect(field.source.kind).toBe('context');
+    expect(field.source.params.mark).toBe('dot');
+    expect(field.style.markers).toBe('dot');
+    // The threads leave from the very same dots, so both forms share the source and the placement.
+    expect(threads.source).toEqual(field.source);
+    expect([threads.x, threads.y, threads.scale]).toEqual([field.x, field.y, field.scale]);
+    expect(threads.ops).toHaveLength(1);
+    expect(threads.ops[0]).toMatchObject({ kind: 'connect', params: { mode: 'focus', split: true, which: 'relevant', keepLines: false } });
+    expect(threads.style).toMatchObject({ dash: 'dotted', colorBy: 'family' });
+    expect(threads.style.width).toBeLessThan(2);
+    // Every thread ends at one of the two foci, above and below the field.
+    const fy = Number(threads.ops[0].params.fy);
+    const ends = new Set(buildForm(threads).geometry.lines.map((l) => l.pts[l.pts.length - 1].join(',')));
+    expect(ends).toEqual(new Set([`0,${fy},0`, `0,${-fy},0`]));
+    // The rings sit exactly on the foci, in artboard pixels (y runs down).
+    expect(rings).toHaveLength(2);
+    expect(rings.map((r) => r.y).sort((a, b) => a - b)).toEqual([field.y - fy * field.scale, field.y + fy * field.scale]);
+    for (const r of rings) {
+      expect(r.x).toBe(field.x);
+      expect(r.style.markers).toBe('ring');
+      expect(buildForm(r).geometry.nodes).toHaveLength(1);
+    }
+    for (const f of forms) expect(f).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+  });
+
+  it('ships the strip field: flat rows of solid hyphenated slabs, the relevant ones in the accent', () => {
+    const element = ELEMENTS.find((e) => e.id === 'strip-field')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'strip', params: { mode: 'generate', rows: 14 } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp' });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(new Set(g.nodes.map((n) => n.p[1])).size).toBe(14);
+    expect(g.nodes.some((n) => n.family === 1) && g.nodes.some((n) => n.family === 0)).toBe(true);
+    // Both families show up as fills, and the document ramp supplies the colours.
+    const r = renderForm(form, DOC.ramp);
+    expect(r.fills.map((f) => f.color)).toEqual([DOC.ramp[0], DOC.ramp[2]]);
+  });
+
+  it('ships the linked mark: one solid bar of two slabs on a neck, its finish cut on a slant', () => {
+    const element = ELEMENTS.find((e) => e.id === 'linked-mark')!;
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'strip', params: { mode: 'pattern', ramp: 30, finishEnd: 'slant', slant: 18 } });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1 });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const g = buildForm(form).geometry;
+    expect(g.lines).toHaveLength(1);
+    expect(g.nodes).toHaveLength(2);
+    // The bottom-right corner reaches further right than the top-right one.
+    const pts = g.lines[0].pts;
+    const [top, bottom] = [Math.max(...pts.map((p) => p[1])), Math.min(...pts.map((p) => p[1]))];
+    const right = (y: number) => Math.max(...pts.filter((p) => Math.abs(p[1] - y) < 0.02 * (top - bottom)).map((p) => p[0]));
+    expect(right(bottom)).toBeGreaterThan(right(top));
+    expect(renderForm(form, DOC.ramp).fills).toHaveLength(1);
+  });
+
+  it('ships the memory burst: a flat context field thrown outward, ink-finished, the relevant pieces in the accent', () => {
+    const element = ELEMENTS.find((e) => e.id === 'memory-burst')!;
+    expect(element.name).toBe('Memory burst');
+    expect(element.forms).toHaveLength(1);
+    const [form] = placeElement(element, 1000, 1000);
+    expect(form.source).toMatchObject({ kind: 'context', params: { cut: 'slant' } });
+    expect(Number(form.source.params.tokens)).toBeGreaterThanOrEqual(1500);
+    expect(form.ops.map((o) => o.kind)).toEqual(['burst']);
+    expect(form.ops[0].params).toMatchObject({ mode: 'radial', keepPoints: false });
+    expect(form.style).toMatchObject({ fill: 'shapes', fillOpacity: 1, colorBy: 'family', color: 'ramp', markers: 'dot', finish: 'ink' });
+    expect(form).toMatchObject({ rx: 0, ry: 0, perspective: 0 });
+    const built = buildForm(form);
+    expect(built.warnings).toEqual([]);
+    // The spray is the form's only points: exactly the droplets asked for, every one of them finite.
+    expect(built.geometry.nodes).toHaveLength(Number(form.ops[0].params.spray));
+    expect(finite(built.geometry)).toBe(true);
+    expect(built.geometry.lines.length).toBeGreaterThan(1000);
+    expect(built.geometry.lines.reduce((a, l) => a + l.pts.length, 0)).toBeLessThanOrEqual(POINT_BUDGET);
+    expect(built.geometry.lines.some((l) => l.family === 1) && built.geometry.lines.some((l) => l.family === 0)).toBe(true);
+    // The finish is drawn, and on every theme the two families get the ramp's two ends.
+    expect(docToSVG({ ...DOC, forms: [form] })).toMatch(/<filter id="vectr-fin-[a-z0-9]+"/);
+    for (const t of THEMES) {
+      expect(renderForm(form, t.ramp).fills.map((f) => f.color)).toEqual([t.ramp[0], t.ramp[t.ramp.length - 1]]);
+    }
+  });
+
+  it('scales a finish with the element, like a label, and keeps stored finish scales within the style range', () => {
+    const element = ELEMENTS.find((e) => e.id === 'memory-burst')!;
+    expect(placeElement(element, 1000, 1000)[0].style.finishScale).toBe(1);
+    expect(placeElement(element, 500, 800)[0].style.finishScale).toBeCloseTo(0.5, 6);
+    // A thumbnail is not stored, so it gets the true ratio, which a document could not hold.
+    expect(placeElement(element, 100, 100)[0].style.finishScale).toBeCloseTo(0.1, 6);
+    const stored = (w: number) => (elementDocForms(element, w, w)[0].style as { finishScale?: number }).finishScale;
+    expect(stored(1000)).toBeUndefined();
+    expect(stored(500)).toBeCloseTo(0.5, 6);
+    expect(stored(100)).toBe(0.2);
+    for (const w of [100, 500, 2000]) expect(parseDoc({ width: w, height: w, forms: elementDocForms(element, w, w) }).warnings).toEqual([]);
+    // Elements without a finish are untouched.
+    expect(placeElement(ELEMENTS[0], 500, 500)[0].style.finishScale).toBe(1);
+  });
+
   it('keeps every card flat, in elements and in recipes', () => {
     const cards = [
       ...ELEMENTS.flatMap((e) => e.forms.filter((f) => f.source.kind === 'card').map((f) => ({ ...DEFAULT_CARD_VIEW, ...f.transform }))),
@@ -230,6 +347,27 @@ describe('themes', () => {
     expect(fog.background.toLowerCase()).not.toBe('#f3f2e9');
     const lum = (c: string) => [1, 3, 5].reduce((a, i) => a + parseInt(c.slice(i, i + 2), 16), 0);
     expect(fog.ramp.map(lum)).toEqual([...fog.ramp.map(lum)].sort((a, b) => b - a));
+  });
+});
+
+describe('deep theme', () => {
+  const deep = THEMES.find((t) => t.id === 'deep')!;
+  it('is a deep blue with a ramp from white to a light blue', () => {
+    expect(deep.name).toBe('Deep');
+    expect(deep.background).toBe('#0b4a78');
+    expect(deep.ramp[0]).toBe('#ffffff');
+    const [r, , b] = deep.ramp[deep.ramp.length - 1].slice(1).match(/../g)!.map((h) => parseInt(h, 16));
+    expect(b).toBeGreaterThan(r);
+    expect(b).toBeGreaterThan(200);
+  });
+  it('is stored the way a parsed document stores it, so the theme picker can tell it is in use', () => {
+    const { doc } = parseDoc({ background: deep.background, ramp: deep.ramp });
+    expect(doc.background).toBe(deep.background);
+    expect(doc.ramp).toEqual(deep.ramp);
+  });
+  it('colours family 0 white and family 1 light blue', () => {
+    const f = createForm({ source: { kind: 'context', params: { layout: 'window', tokens: 60, relevant: 0.3 } }, style: { fill: 'shapes', colorBy: 'family' } }, at);
+    expect(renderForm(f, deep.ramp).fills.map((x) => x.color)).toEqual([deep.ramp[0], deep.ramp[2]]);
   });
 });
 

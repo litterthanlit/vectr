@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COLOR_LEVELS, LABEL_FONT, LABEL_FONTS, SOURCES, buildForm, cleanText, compactDoc, createForm, decodeDoc, describeBlocks, docToSVG, encodeDoc,
+  COLOR_LEVELS, DEFAULT_STYLE, LABEL_FONT, LABEL_FONTS, SOURCES, buildForm, cleanText, compactDoc, createForm, decodeDoc, describeBlocks, docToSVG, encodeDoc,
   formToSVG, parseDoc, renderForm, sampleRamp, serializeDoc, textWidth, wrapText,
 } from '../src/index.js';
 import type { Form, Geometry, GeoLabel, Polyline, Style } from '../src/index.js';
+import { Resvg } from '@resvg/resvg-js';
 
 const RAMP = ['#222222', '#ffffff'];
 const at = { x: 500, y: 500 };
@@ -534,5 +535,274 @@ describe('text params', () => {
     const params = describeBlocks().sources.find((s) => s.kind === 'probe')!.params;
     expect(params.find((p) => p.key === 'text')).toMatchObject({ type: 'string', maxLength: 200, multiline: true });
     expect(params.find((p) => p.key === 'id')).not.toHaveProperty('multiline');
+  });
+});
+
+describe('finishes', () => {
+  const FINISHES = ['ink', 'grain', 'rough'] as const;
+  const circle = (style: Partial<Style> = {}, transform: Partial<Form> = {}) => mk({ kind: 'curve', params: { shape: 'circle' } }, { fill: 'shapes', ...style }, [], { rx: 0, ry: 0, scale: 100, ...transform });
+  const svgOf = (f: Form, paper?: string, view?: { x: number; y: number; w: number; h: number }) => formToSVG(f, renderForm(f, RAMP), paper, view);
+  const idOf = (svg: string) => /<filter id="([^"]+)"/.exec(svg)?.[1];
+  const filters = (svg: string) => [...svg.matchAll(/<filter [^>]*>.*?<\/filter>/gs)].map((m) => m[0]);
+
+  it('clean, the default, emits no filter at all', () => {
+    for (const f of [circle(), circle({ finish: 'clean', finishAmount: 1 }), sphere()]) {
+      const svg = svgOf(f);
+      expect(svg).not.toMatch(/filter|<defs|url\(/);
+    }
+    expect(DEFAULT_STYLE.finish).toBe('clean');
+    expect(docToSVG(parseDoc({ forms: [{ source: { kind: 'curve' } }] }).doc)).not.toMatch(/vectr-fin|<defs/);
+  });
+
+  it.each(FINISHES)('%s emits its filter in the form group and applies it to an inner group around everything', (finish) => {
+    const g = probe({ lines: [sq(-1, -1, 2, { family: 0 })], nodes: [{ p: [0, 0, 0] }], labels: [{ p: [0, 0, 0], text: 'Hi' }] }, { fill: 'shapes', finish, opacity: 0.6, markers: 'dot' });
+    const svg = svgOf(g);
+    const id = idOf(svg)!;
+    expect(id).toMatch(/^vectr-fin-[a-z0-9]+$/);
+    // <g opacity><defs><filter/></defs><g filter>…everything…</g></g>
+    expect(svg.startsWith(`<g opacity="0.6"><defs><filter id="${id}" `)).toBe(true);
+    expect(svg).toMatch(new RegExp(`</filter></defs><g filter="url\\(#${id}\\)">`));
+    expect(svg.endsWith('</g></g>')).toBe(true);
+    const inner = svg.slice(svg.indexOf(`<g filter="url(#${id})">`));
+    for (const tag of ['<path', '<text']) expect(svg.split(tag).length, tag).toBe(inner.split(tag).length);
+    expect(svg.slice(0, svg.indexOf('</filter>'))).not.toMatch(/<path|<text/);
+    expect(filters(svg)).toHaveLength(1);
+    expect(svg.split('filter="url(').length).toBe(2);
+    // Every filter uses sRGB maths, so colours are not shifted, and has a region of its own.
+    expect(svg).toMatch(/color-interpolation-filters="sRGB"/);
+    expect(svg).toMatch(/filterUnits="userSpaceOnUse" x="-?\d+" y="-?\d+" width="\d+" height="\d+"/);
+  });
+
+  it('builds each finish from its own primitives', () => {
+    const body = (finish: Style['finish']) => filters(svgOf(circle({ finish })))[0];
+    const ink = body('ink'), grain = body('grain'), rough = body('rough');
+    for (const tag of ['feTurbulence', 'feDisplacementMap', 'feGaussianBlur', 'feColorMatrix']) expect(ink, tag).toContain(`<${tag}`);
+    // Ink cuts the alpha hard after blurring, so close pieces fuse; it keeps colour channels as they are.
+    expect(ink).toMatch(/<feColorMatrix [^>]*values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -6\.4"/);
+    expect(grain).toContain('<feTurbulence');
+    expect(grain).toContain('<feColorMatrix');
+    expect(grain).toMatch(/<feComposite [^>]*operator="in"/);
+    expect(grain).not.toContain('feGaussianBlur');
+    expect(rough).toContain('<feTurbulence');
+    expect(rough).toContain('<feDisplacementMap');
+    expect(rough).not.toMatch(/feGaussianBlur|feColorMatrix|feComposite/);
+    for (const f of [ink, grain, rough]) expect(f).not.toMatch(/NaN|undefined|Infinity/);
+  });
+
+  it('scales the finish with amount and scale, and seeds its noise with finishSeed', () => {
+    const num = (svg: string, re: RegExp) => Number(re.exec(svg)![1]);
+    const disp = (s: Partial<Style>) => num(filters(svgOf(circle({ finish: 'rough', ...s })))[0], /scale="([\d.]+)"/);
+    expect(disp({ finishAmount: 0.9 })).toBeGreaterThan(disp({ finishAmount: 0.2 }));
+    expect(disp({ finishScale: 2 })).toBeCloseTo(disp({ finishScale: 1 }) * 2, 2);
+    const freq = (s: Partial<Style>) => num(filters(svgOf(circle({ finish: 'rough', ...s })))[0], /baseFrequency="([\d.]+)"/);
+    expect(freq({ finishScale: 2 })).toBeCloseTo(freq({ finishScale: 1 }) / 2, 2);
+    const seedOf = (s: Partial<Style>) => num(filters(svgOf(circle({ finish: 'ink', ...s })))[0], /seed="(\d+)"/);
+    expect(seedOf({ finishSeed: 7 })).toBe(7);
+    expect(seedOf({ finishSeed: 300 })).toBe(300);
+    const blur = (s: Partial<Style>) => num(filters(svgOf(circle({ finish: 'ink', ...s })))[0], /stdDeviation="([\d.]+)"/);
+    expect(blur({ finishAmount: 1 })).toBeGreaterThan(blur({ finishAmount: 0 }));
+    expect(blur({ finishScale: 3 })).toBeGreaterThan(blur({ finishScale: 1 }) * 2.9);
+  });
+
+  it('gives each filter a stable id that depends on everything the filter depends on', () => {
+    const base = circle({ finish: 'ink' });
+    const id = (f: Form) => idOf(svgOf(f))!;
+    expect(id(base)).toBe(id(circle({ finish: 'ink' })));
+    expect(idOf(docToSVG({ ...parseDoc({}).doc, forms: [base] }))).toBe(idOf(docToSVG({ ...parseDoc({}).doc, forms: [circle({ finish: 'ink' })] })));
+    const ids = new Set([
+      id(base), id(circle({ finish: 'grain' })), id(circle({ finish: 'rough' })), id(circle({ finish: 'ink', finishAmount: 0.51 })),
+      id(circle({ finish: 'ink', finishScale: 1.5 })), id(circle({ finish: 'ink', finishSeed: 2 })), id(circle({ finish: 'ink' }, { scale: 150 })),
+    ]);
+    expect(ids.size).toBe(7);
+    // The same filter is byte-identical wherever it appears, so a repeated id can only repeat the same definition.
+    expect(filters(svgOf(base))).toEqual(filters(svgOf(circle({ finish: 'ink' }))));
+    const doc = docToSVG({ ...parseDoc({}).doc, forms: [base, circle({ finish: 'ink', finishSeed: 9 }, { x: 800 }), circle({ finish: 'ink' })] });
+    const defs = filters(doc);
+    for (const d of defs) expect(defs.filter((e) => idOf(e) === idOf(d)).every((e) => e === d)).toBe(true);
+  });
+
+  it('writes only safe ids, and ignores a finish or a number it does not know', () => {
+    const hostile = circle({ finish: 'ink"><script>alert(1)</script>' as never, finishAmount: '"/><x/>' as never, finishScale: '1" onload="x' as never, finishSeed: '9"><y/>' as never });
+    expect(svgOf(hostile)).not.toMatch(/filter|<script|<x|<y|onload/);
+    const odd = circle({ finish: 'ink', finishAmount: '"/><x/>' as never, finishScale: '1" onload="x' as never, finishSeed: '9"><y/>' as never });
+    const svg = svgOf(odd);
+    expect(svg).toContain('<filter id="vectr-fin-');
+    expect(svg).not.toMatch(/<x|<y|onload|NaN/);
+    expect(idOf(svg)).toMatch(/^[a-z0-9-]+$/);
+    for (const [finishAmount, finishScale, finishSeed] of [[NaN, NaN, NaN], [-5, 0, -9], [99, 1e9, 1e9], [Infinity, -Infinity, 0.4]]) {
+      const s = svgOf(circle({ finish: 'grain', finishAmount, finishScale, finishSeed }));
+      expect(s).not.toMatch(/NaN|undefined|Infinity/);
+      expect(idOf(s)).toMatch(/^vectr-fin-[a-z0-9]+$/);
+    }
+  });
+
+  it('keeps the filter to the visible artboard, however far pieces fly off it', () => {
+    const wide = probe({ lines: [sq(-40, -40, 80), sq(0, 0, 1)] }, { fill: 'shapes', finish: 'ink' });
+    const view = { x: 0, y: 0, w: 1000, h: 800 };
+    const region = (svg: string) => {
+      const m = /<filter [^>]*x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/.exec(svg)!;
+      return { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
+    };
+    const open = region(svgOf(wide)), cut = region(svgOf(wide, undefined, view));
+    expect(cut.w * cut.h).toBeLessThan(open.w * open.h / 3);
+    expect(cut.x).toBeGreaterThanOrEqual(-60);
+    expect(cut.y).toBeGreaterThanOrEqual(-60);
+    expect(cut.x + cut.w).toBeLessThanOrEqual(1060);
+    expect(cut.y + cut.h).toBeLessThanOrEqual(860);
+    // docToSVG passes the artboard through, and a form wholly off it still gets a valid (tiny) region.
+    const far = circle({ finish: 'ink' }, { x: 9000, y: 9000 });
+    const gone = region(svgOf(far, undefined, view));
+    expect(gone.w).toBeGreaterThanOrEqual(1);
+    expect(gone.h).toBeGreaterThanOrEqual(1);
+    const doc = parseDoc({ width: 1000, height: 800, forms: [{ source: { kind: 'curve' }, x: 0, y: 0, scale: 4000, style: { finish: 'ink' } }] }).doc;
+    const r = region(docToSVG(doc));
+    expect(r.w * r.h).toBeLessThan(1200 * 1000);
+  });
+
+  it('stacks with the document-wide hand-drawn wobble', () => {
+    const doc = { ...parseDoc({ rough: 4 }).doc, forms: [circle({ finish: 'grain' })] };
+    const svg = docToSVG(doc);
+    expect(svg).toContain('id="vectr-rough"');
+    expect(svg).toContain('filter="url(#vectr-rough)"');
+    expect(svg).toMatch(/filter="url\(#vectr-fin-[a-z0-9]+\)"/);
+  });
+
+  describe('as pixels, in resvg', () => {
+    const SIZE = 400;
+    const raster = (forms: Form[], background = '#ffffff') => {
+      const doc = { ...parseDoc({ width: SIZE, height: SIZE, background }).doc, forms };
+      const img = new Resvg(docToSVG(doc), { fitTo: { mode: 'width', value: SIZE } }).render();
+      expect(img.width).toBe(SIZE);
+      expect(img.height).toBe(SIZE);
+      // `pixels` is a copy each time it is read, so read it once.
+      const pixels = img.pixels;
+      const at = (x: number, y: number) => [...pixels.subarray((y * SIZE + x) * 4, (y * SIZE + x) * 4 + 4)];
+      return { at, png: img.asPng(), pixels };
+    };
+    const RED = { fill: 'shapes', fillOpacity: 1, color: 'solid', stroke: '#e11d2e', taper: 'none', width: 0.1, markers: 'none', labels: false } as const;
+    const bars = (finish: Style['finish']) => {
+      // Two bars with a 5px gap between them, and a bar far off, centred on the artboard.
+      const lines = [sq(-1.5, 0.05, 1.45), sq(-1.5, -1.5, 1.45)].map((l) => ({ ...l, pts: l.pts.map(([x, y, z]) => [x, y, z] as Vec3) }));
+      return probe({ lines }, { ...RED, finish }, { x: 200, y: 200, scale: 100 });
+    };
+    type Vec3 = [number, number, number];
+
+    it.each(FINISHES)('%s renders without error and differs from clean', (finish) => {
+      const clean = raster([bars('clean')]), done = raster([bars(finish)]);
+      expect(done.png.length).toBeGreaterThan(200);
+      expect(Buffer.compare(done.pixels, clean.pixels)).not.toBe(0);
+      // Both draw something, and the artboard background is still the paper.
+      expect(done.at(2, 2)).toEqual([255, 255, 255, 255]);
+      expect([...done.pixels].some((v, i) => i % 4 === 0 && v > 200 && done.pixels[i + 1] < 80)).toBe(true);
+    });
+
+    it('ink fuses pieces that sit close, and keeps their colour', () => {
+      const lines = [sq(-1.2, 0.025, 1.1), sq(-1.2, -1.125, 1.1)];
+      const mk2 = (finish: Style['finish']) => probe({ lines: lines.map((l) => ({ ...l, pts: l.pts.map(([x, y]): Vec3 => [x, y * 1, 0]) })) }, { ...RED, finish, finishAmount: 0.6 }, { x: 200, y: 200, scale: 100 });
+      // Two blocks 5px apart (y = 0 ± 2.5px): the gap is paper when clean, ink once fused.
+      const clean = raster([mk2('clean')]), ink = raster([mk2('ink')]);
+      expect(clean.at(90, 200)).toEqual([255, 255, 255, 255]);
+      const fused = ink.at(90, 200);
+      expect(fused[3]).toBe(255);
+      expect(fused[0]).toBeGreaterThan(200);
+      expect(fused[1]).toBeLessThan(60);
+      expect(fused[2]).toBeLessThan(80);
+      // The solid inside of a block is its own colour, and far from any ink is paper.
+      expect(ink.at(150, 150)).toEqual([225, 29, 46, 255]);
+      expect(ink.at(395, 5)).toEqual([255, 255, 255, 255]);
+    });
+
+    it('ink tears the edge of a block rather than keeping it straight, but only at the edge', () => {
+      const blockRaster = (finish: Style['finish']) => raster([probe({ lines: [sq(-1.5, -1.5, 3)] }, { ...RED, finish, finishAmount: 0.7 }, { x: 200, y: 200, scale: 100 })]);
+      const inked = blockRaster('ink'), clean = blockRaster('clean');
+      // The left edge of the clean block is the column x = 50; the inked one wanders about it.
+      const edge = (r: ReturnType<typeof raster>) => Array.from({ length: 200 }, (_, i) => { let x = 0; while (x < SIZE && r.at(x, 100 + i)[3] === 255 && r.at(x, 100 + i)[1] > 240) x++; return x; });
+      const cleanEdge = edge(clean), inkEdge = edge(inked);
+      expect(new Set(cleanEdge).size).toBeLessThanOrEqual(2);
+      expect(new Set(inkEdge).size).toBeGreaterThan(3);
+      expect(inked.at(200, 200)).toEqual([225, 29, 46, 255]);
+    });
+
+    it('grain keeps most of a fill at the default amount, and loses more as the amount rises', () => {
+      const coverage = (amount: number) => {
+        const r = raster([probe({ lines: [sq(-1.5, -1.5, 3)] }, { ...RED, finish: 'grain', finishAmount: amount }, { x: 200, y: 200, scale: 100 })]);
+        let on = 0, total = 0;
+        for (let y = 80; y < 320; y++) for (let x = 80; x < 320; x++, total++) if (r.at(x, y)[3] > 128 && r.at(x, y)[1] < 128) on++;
+        return on / total;
+      };
+      expect(coverage(0.5)).toBeGreaterThan(0.75);
+      expect(coverage(0.5)).toBeLessThan(0.99);
+      expect(coverage(1)).toBeLessThan(coverage(0.5));
+      expect(coverage(0)).toBeGreaterThan(coverage(0.5) - 0.001);
+    });
+
+    it('rough wobbles the edge and leaves the inside alone', () => {
+      const r = raster([probe({ lines: [sq(-1.5, -1.5, 3)] }, { ...RED, finish: 'rough', finishAmount: 0.8 }, { x: 200, y: 200, scale: 100 })]);
+      expect(r.at(200, 200)).toEqual([225, 29, 46, 255]);
+      const edge = Array.from({ length: 100 }, (_, i) => { let x = 0; while (x < SIZE && r.at(x, 150 + i)[1] > 240) x++; return x; });
+      expect(new Set(edge).size).toBeGreaterThan(3);
+    });
+
+    it('draws every finish on a deep background, in a doc with several forms, without error', () => {
+      for (const finish of FINISHES) {
+        const r = raster([bars(finish), circle({ finish, finishAmount: 1, finishScale: 4 }, { x: 300, y: 300, scale: 60 }), circle({ finish, finishAmount: 0, finishScale: 0.2, finishSeed: 999 }, { x: 100, y: 300, scale: 60 })], '#0B4A78');
+        expect(r.png.length).toBeGreaterThan(200);
+        expect(r.at(1, 1)).toEqual([11, 74, 120, 255]);
+      }
+    });
+  });
+
+  describe('as a style', () => {
+    const spec = {
+      forms: [
+        { source: { kind: 'curve', params: { shape: 'circle' } }, style: { fill: 'shapes', finish: 'ink', finishAmount: 0.7, finishScale: 1.5, finishSeed: 12 } },
+        { source: { kind: 'curve', params: { shape: 'rect' } }, style: { finish: 'grain' } },
+        { source: { kind: 'curve', params: { shape: 'star' } }, style: { finish: 'rough', finishAmount: 0, finishScale: 0.2, finishSeed: 999 } },
+      ],
+    };
+
+    it('parses without warnings, and keeps only what is not a default through compactDoc', () => {
+      const { doc, warnings } = parseDoc(spec);
+      expect(warnings).toEqual([]);
+      expect(doc.forms[0].style).toMatchObject({ finish: 'ink', finishAmount: 0.7, finishScale: 1.5, finishSeed: 12 });
+      expect(doc.forms[1].style).toMatchObject({ finish: 'grain', finishAmount: 0.5, finishScale: 1, finishSeed: 1 });
+      const compact = compactDoc(doc) as { forms: { style: Record<string, unknown> }[] };
+      expect(compact.forms[0].style).toMatchObject({ finish: 'ink', finishAmount: 0.7, finishScale: 1.5, finishSeed: 12 });
+      expect(compact.forms[1].style).toEqual({ finish: 'grain' });
+      expect(compact.forms[2].style).toEqual({ finish: 'rough', finishAmount: 0, finishScale: 0.2, finishSeed: 999 });
+      expect(compactDoc(parseDoc({ forms: [{ source: { kind: 'curve' } }] }).doc)).not.toHaveProperty('forms.0.style');
+    });
+
+    it('survives compact, file and share-link round trips with identical art and no warnings', async () => {
+      const { doc } = parseDoc(spec);
+      const svg = docToSVG(doc);
+      expect(svg.match(/<filter /g)).toHaveLength(3);
+      const a = parseDoc(compactDoc(doc));
+      expect(a.warnings).toEqual([]);
+      expect(docToSVG(a.doc)).toBe(svg);
+      const b = parseDoc(serializeDoc(doc));
+      expect(b.warnings).toEqual([]);
+      expect(docToSVG(b.doc)).toBe(svg);
+      const c = await decodeDoc(`#d=${await encodeDoc(doc)}`);
+      expect(c.warnings).toEqual([]);
+      expect(docToSVG(c.doc)).toBe(svg);
+    });
+
+    it('corrects a bad finish, amount or scale with a warning, and clamps a seed as every seed is', () => {
+      const { doc, warnings } = parseDoc({ forms: [{ source: { kind: 'curve' }, style: { finish: 'smudge', finishAmount: 4, finishScale: 0.01, finishSeed: 5000 } }] });
+      expect(warnings).toHaveLength(3);
+      expect(warnings.join('\n')).toMatch(/finish/);
+      expect(doc.forms[0].style).toMatchObject({ finish: 'clean', finishAmount: 1, finishScale: 0.2, finishSeed: 999 });
+      expect(parseDoc({ forms: [{ source: { kind: 'curve' }, style: { finish: 'ink', finishSeed: 7.6 } }] }).doc.forms[0].style.finishSeed).toBe(8);
+    });
+
+    it('is described to agents, with the amount, scale and seed shown only for a finish', () => {
+      const style = describeBlocks().style.params;
+      const by = (k: string) => style.find((p) => p.key === k)!;
+      expect(by('finish')).toMatchObject({ type: 'enum', options: ['clean', 'ink', 'grain', 'rough'], default: 'clean' });
+      expect(by('finishAmount')).toMatchObject({ type: 'number', min: 0, max: 1, default: 0.5, only_when: { key: 'finish', in: ['ink', 'grain', 'rough'] } });
+      expect(by('finishScale')).toMatchObject({ type: 'number', min: 0.2, max: 4, default: 1, only_when: { key: 'finish', in: ['ink', 'grain', 'rough'] } });
+      expect(by('finishSeed')).toMatchObject({ type: 'integer', default: 1, only_when: { key: 'finish', in: ['ink', 'grain', 'rough'] } });
+    });
   });
 });

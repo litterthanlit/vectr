@@ -54,6 +54,14 @@ describe('tool surface', () => {
     for (const e of ELEMENTS) expect(text).toContain(e.id);
   });
 
+  it('teaches bursts and finishes: the operator, its modes, ink needing solid fills, and the slower ink previews', () => {
+    const text = client.getInstructions()!;
+    expect(text).toMatch(/burst operator/);
+    for (const word of ['radial', 'horizontal', 'shatter', 'spray', 'keepPoints', 'ink', 'grain', 'rough', 'memory-burst', 'deep']) expect(text).toContain(word);
+    expect(text).toMatch(/ink[^.]*fill "shapes"[^.]*fillOpacity 1/);
+    expect(text).toMatch(/Ink PNG previews are slower at large preview widths/);
+  });
+
   it('accepts every engine style option, so none is rejected at the boundary', async () => {
     const { tools } = await client.listTools();
     const update = tools.find((t) => t.name === 'vectr_update_design')!;
@@ -181,6 +189,113 @@ describe('design lifecycle', () => {
     expect(md).not.toContain('long-baseline');
     const json = textOf(await call('vectr_get_design', { design_id: 'd1', response_format: 'json' }));
     expect(json).toContain(caption);
+  });
+
+  it('teaches the context source and focus mode, and takes a long pasted text whole, with a preview', async () => {
+    const tips = client.getInstructions()!;
+    expect(tips).toMatch(/context source makes a field of token blocks/);
+    expect(tips).toMatch(/fill "shapes"/);
+    expect(tips).toMatch(/connect mode "focus"/);
+    expect(textOf(await call('vectr_list_building_blocks', { block: 'context' }))).toMatch(/^### context — Context/);
+    expect(textOf(await call('vectr_list_building_blocks', { block: 'connect' }))).toMatch(/`fy` \(Focus Y\): -3–3, default 1.2 _\(only when mode is focus\)_/);
+
+    const long = Array.from({ length: 560 }, (_, i) => `word${i % 9}`).join(' ');
+    expect(long.length).toBeGreaterThan(3000);
+    expect(long.length).toBeLessThan(4000);
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [{
+          source: { kind: 'context', params: { text: long, highlight: 'word3', layout: 'burst' } },
+          ops: [{ kind: 'connect', params: { mode: 'focus', split: true, which: 'relevant', fy: 1.4 } }],
+          style: { fill: 'shapes', colorBy: 'family' },
+        }],
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const f = design(r).forms[0] as { source: { params: Record<string, unknown> }; ops: { params: Record<string, unknown> }[] };
+    expect(f.source.params.text).toBe(long);
+    expect(f.ops[0].params).toMatchObject({ mode: 'focus', split: true, which: 'relevant', fy: 1.4 });
+  });
+
+  it('teaches the strip source, lists its params, and takes a long text and a pattern whole, with a preview', async () => {
+    const tips = client.getInstructions()!;
+    expect(tips).toMatch(/strip source draws rows of slabs joined by thinner necks/);
+    expect(tips).toMatch(/'#' slab, '-' neck/);
+    expect(tips).toMatch(/colorBy "family" with a 2-stop ramp/);
+    expect(tips).toMatch(/connect mode "focus" with which "relevant"/);
+    const listing = textOf(await call('vectr_list_building_blocks', { block: 'strip' }));
+    expect(listing).toMatch(/^### strip — Strip/);
+    expect(listing).toMatch(/`ramp` \(Ramp\)/);
+    expect(listing).toMatch(/`pattern` \(Pattern\)[^\n]*only when mode is pattern/);
+
+    const long = Array.from({ length: 560 }, (_, i) => `word${i % 9}`).join(' ');
+    const pattern = '####--######\n#####-####\n###  #######';
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [
+          { source: { kind: 'strip', params: { mode: 'text', text: long, highlight: 'word3' } }, style: { fill: 'shapes', colorBy: 'family' } },
+          { source: { kind: 'strip', params: { pattern, finishEnd: 'round', ramp: 45 } }, style: { fill: 'shapes' } },
+        ],
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const [a, b] = design(r).forms as { source: { params: Record<string, unknown> } }[];
+    expect(a.source.params.text).toBe(long);
+    expect(b.source.params).toMatchObject({ pattern, finishEnd: 'round', ramp: 45 });
+  });
+
+  it('lists the burst operator, and builds and previews a burst', async () => {
+    const listing = textOf(await call('vectr_list_building_blocks', { block: 'burst' }));
+    expect(listing).toMatch(/^### burst — Burst/);
+    expect(listing).toMatch(/`shatter` \(Shatter\): 0–24/);
+    expect(listing).toMatch(/`spray` \(Spray\): 0–600/);
+    expect(listing).toMatch(/`align` \(Align\)[^\n]*only when mode is radial/);
+
+    const r = await call('vectr_create_design', {
+      design: {
+        forms: [{
+          source: { kind: 'context', params: { layout: 'burst', tokens: 600, cut: 'slant', cutAngle: 30 } },
+          ops: [{ kind: 'burst', params: { shatter: 2, spray: 80, keepPoints: true, mode: 'horizontal' } }],
+          style: { fill: 'shapes', colorBy: 'family', markers: 'dot', markerSize: 7 },
+        }],
+      },
+      preview_width: 320,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    const f = design(r).forms[0] as { source: { params: Record<string, unknown> }; ops: { kind: string; params: Record<string, unknown> }[] };
+    expect(f.source.params).toMatchObject({ cut: 'slant', cutAngle: 30 });
+    expect(f.ops[0]).toMatchObject({ kind: 'burst', params: { shatter: 2, spray: 80, keepPoints: true, mode: 'horizontal' } });
+  });
+
+  it('takes a finish in the style, lists it, keeps it through an update, and previews it', async () => {
+    const style = textOf(await call('vectr_list_building_blocks', { block: 'style' }));
+    expect(style).toMatch(/`finish` \(Finish\)/);
+    expect(style).toMatch(/`finishAmount` \(Finish amount\)[^\n]*only when finish is ink\/grain\/rough/);
+
+    const r = await call('vectr_create_design', {
+      design: {
+        background: '#0B4A78',
+        forms: [{ source: { kind: 'context', params: { layout: 'burst', tokens: 300 } }, style: { fill: 'shapes', finish: 'ink', finishAmount: 0.6, finishScale: 1.2, finishSeed: 9 } }],
+      },
+      preview_width: 320,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).not.toMatch(/Corrections/);
+    expect(images(r)).toHaveLength(1);
+    expect(Buffer.from(images(r)[0].data, 'base64').length).toBeGreaterThan(500);
+    expect((design(r).forms[0] as { style: Record<string, unknown> }).style).toMatchObject({ finish: 'ink', finishAmount: 0.6, finishScale: 1.2, finishSeed: 9 });
+    // A style change merges into the finish, and an unknown finish is refused at the boundary.
+    const u = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style: { finish: 'grain' } }], preview: false });
+    expect(u.isError).toBeFalsy();
+    expect((design(u).forms[0] as { style: Record<string, unknown> }).style).toMatchObject({ finish: 'grain', finishAmount: 0.6 });
+    const bad = await call('vectr_update_design', { design_id: 'd1', update_forms: [{ id: 'F1', style: { finish: 'smudge' } }], preview: false });
+    expect(bad.isError).toBe(true);
   });
 
   it('mutates a form and applies the chosen variation', async () => {
